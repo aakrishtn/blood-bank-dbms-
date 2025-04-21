@@ -166,8 +166,13 @@ export default function DashboardPage() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p>Loading dashboard...</p>
+      <div className="flex min-h-screen items-center justify-center bg-white">
+        <div className="text-center">
+          <div className="mx-auto h-16 w-16 rounded-full bg-red-100 p-3 mb-4">
+            <div className="h-full w-full rounded-full bg-red-600 animate-pulse"></div>
+          </div>
+          <p className="text-black font-medium">Loading dashboard...</p>
+        </div>
       </div>
     );
   }
@@ -178,19 +183,20 @@ export default function DashboardPage() {
         <div className="container mx-auto py-4 px-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-red-600">Blood Bank Dashboard</h1>
           <div className="flex items-center gap-4">
-            <p className="text-sm">Welcome, {userData?.email}</p>
-            <Button variant="outline" onClick={handleSignOut}>Sign Out</Button>
+            <p className="text-black font-medium">Welcome, {userData?.email}</p>
+            <Button variant="redOutline" onClick={handleSignOut}>Sign Out</Button>
           </div>
         </div>
       </header>
       
       <main className="container mx-auto py-8 px-4">
         <div className="mb-8">
-          <h2 className="text-xl font-semibold mb-4">Your Profile</h2>
-          <Card>
+          <h2 className="text-xl font-semibold text-black mb-4">Your Profile</h2>
+          <Card className="border border-gray-100 shadow-md overflow-hidden">
+            <div className="h-2 bg-red-600"></div>
             <CardHeader>
-              <CardTitle>{userRole === "donor" ? "Donor Profile" : userRole === "receiver" ? "Receiver Profile" : "Hospital Profile"}</CardTitle>
-              <CardDescription>Your registration details</CardDescription>
+              <CardTitle className="text-black">{userRole === "donor" ? "Donor Profile" : userRole === "receiver" ? "Receiver Profile" : "Hospital Profile"}</CardTitle>
+              <CardDescription className="text-black font-medium">Your registration details</CardDescription>
             </CardHeader>
             <CardContent>
               {profileData ? (
@@ -259,38 +265,57 @@ export default function DashboardPage() {
                   )}
                 </div>
               ) : (
-                <p>No profile data available.</p>
+                <p className="text-black font-medium">No profile data available.</p>
               )}
             </CardContent>
             <CardFooter>
-              <Button variant="outline" className="w-full">Edit Profile</Button>
+              <Button variant="redOutline" className="w-full">Edit Profile</Button>
             </CardFooter>
           </Card>
         </div>
         
         <div className="mb-8">
           <Tabs defaultValue="donors">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="donors">Blood Donors</TabsTrigger>
-              <TabsTrigger value="receivers">Blood Receivers</TabsTrigger>
-              <TabsTrigger value="inventory">Blood Inventory</TabsTrigger>
+            <TabsList className="flex justify-center w-full mb-10 rounded-lg border border-gray-200 p-1 gap-1 bg-gray-50">
+              <TabsTrigger 
+                value="donors" 
+                className="flex-1 rounded-md py-3 flex justify-center items-center px-2 text-gray-700 font-medium data-[state=active]:bg-white data-[state=active]:text-red-600 data-[state=active]:font-semibold data-[state=active]:shadow-sm transition-all duration-200 relative"
+              >
+                <span className="text-center">Blood Donors</span>
+                <span className="absolute -bottom-1 left-0 w-full h-0.5 bg-red-600 opacity-0 data-[state=active]:opacity-100 transition-opacity"></span>
+              </TabsTrigger>
+              <TabsTrigger 
+                value="receivers" 
+                className="flex-1 rounded-md py-3 flex justify-center items-center px-2 text-gray-700 font-medium data-[state=active]:bg-white data-[state=active]:text-red-600 data-[state=active]:font-semibold data-[state=active]:shadow-sm transition-all duration-200 relative"
+              >
+                <span className="text-center">Blood Receivers</span>
+                <span className="absolute -bottom-1 left-0 w-full h-0.5 bg-red-600 opacity-0 data-[state=active]:opacity-100 transition-opacity"></span>
+              </TabsTrigger>
+              <TabsTrigger 
+                value="inventory" 
+                className="flex-1 rounded-md py-3 flex justify-center items-center px-2 text-gray-700 font-medium data-[state=active]:bg-white data-[state=active]:text-red-600 data-[state=active]:font-semibold data-[state=active]:shadow-sm transition-all duration-200 relative"
+              >
+                <span className="text-center">Blood Inventory</span>
+                <span className="absolute -bottom-1 left-0 w-full h-0.5 bg-red-600 opacity-0 data-[state=active]:opacity-100 transition-opacity"></span>
+              </TabsTrigger>
             </TabsList>
             
             <TabsContent value="donors">
-              <Card>
+              <Card className="border border-gray-100 shadow-md overflow-hidden">
+                <div className="h-2 bg-red-600"></div>
                 <CardHeader>
-                  <CardTitle>Available Blood Donors</CardTitle>
-                  <CardDescription>List of registered blood donors</CardDescription>
+                  <CardTitle className="text-black">Available Blood Donors</CardTitle>
+                  <CardDescription className="text-black font-medium">List of registered blood donors</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Blood Group</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">City</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Name</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Blood Group</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Age</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">City</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -305,7 +330,7 @@ export default function DashboardPage() {
                           ))
                         ) : (
                           <tr>
-                            <td colSpan={4} className="px-6 py-4 text-center">No donors found</td>
+                            <td colSpan={4} className="px-6 py-4 text-center text-black font-medium">No donors found</td>
                           </tr>
                         )}
                       </tbody>
@@ -316,7 +341,8 @@ export default function DashboardPage() {
             </TabsContent>
             
             <TabsContent value="receivers">
-              <Card>
+              <Card className="border border-gray-100 shadow-md overflow-hidden">
+                <div className="h-2 bg-red-600"></div>
                 <CardHeader>
                   <CardTitle>Blood Receivers</CardTitle>
                   <CardDescription>List of registered blood receivers</CardDescription>
@@ -326,10 +352,10 @@ export default function DashboardPage() {
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Blood Group Needed</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Age</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">City</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Name</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Blood Group Needed</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Age</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">City</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -355,7 +381,8 @@ export default function DashboardPage() {
             </TabsContent>
             
             <TabsContent value="inventory">
-              <Card>
+              <Card className="border border-gray-100 shadow-md overflow-hidden">
+                <div className="h-2 bg-red-600"></div>
                 <CardHeader>
                   <CardTitle>Blood Inventory</CardTitle>
                   <CardDescription>Current blood samples available</CardDescription>
@@ -365,10 +392,10 @@ export default function DashboardPage() {
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sample ID</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Blood Group</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Doctor</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Sample ID</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Blood Group</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Status</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Doctor</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -392,7 +419,7 @@ export default function DashboardPage() {
                 </CardContent>
                 {userRole === "hospital" && (
                   <CardFooter>
-                    <Button className="w-full bg-red-600 hover:bg-red-700">Request Blood Sample</Button>
+                    <Button variant="red" className="w-full">Request Blood Sample</Button>
                   </CardFooter>
                 )}
               </Card>

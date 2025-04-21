@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
-import { donorAPI } from "@/lib/database";
 import { cityAPI } from "@/lib/database";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/components/ui/use-toast";
+import { supabase } from "@/lib/supabase";
 
 interface City {
   city_id: string;
@@ -35,6 +35,24 @@ export default function DonorRegistrationPage() {
       try {
         const citiesData = await cityAPI.getAllCities();
         setCities(citiesData);
+        
+        // If no cities found, try to seed the database
+        if (!citiesData || citiesData.length === 0) {
+          try {
+            console.log("No cities found. Attempting to seed the database...");
+            const response = await fetch('/api/seed/cities');
+            if (response.ok) {
+              // Fetch cities again after seeding
+              const newCitiesData = await cityAPI.getAllCities();
+              setCities(newCitiesData);
+              console.log("Cities seeded successfully!");
+            } else {
+              console.error("Failed to seed cities:", await response.text());
+            }
+          } catch (seedError) {
+            console.error("Error seeding cities:", seedError);
+          }
+        }
       } catch (error) {
         console.error("Error fetching cities:", error);
       }
@@ -78,7 +96,21 @@ export default function DonorRegistrationPage() {
       // Generate a donor ID (could be improved in a production environment)
       const donorId = `D${Date.now().toString().slice(-8)}`;
       
-      await donorAPI.addDonor({
+      // Get current user to associate with the donor record
+      const user = await getCurrentUser();
+      if (!user) {
+        toast({
+          variant: "destructive",
+          title: "Authentication Error",
+          description: "You must be logged in to register as a donor.",
+        });
+        router.push("/login");
+        setIsSubmitting(false);
+        return;
+      }
+      
+      // Create donor record
+      console.log("Adding donor with data:", {
         donor_id: donorId,
         donor_name: donorName,
         donor_age: parseInt(donorAge),
@@ -87,12 +119,38 @@ export default function DonorRegistrationPage() {
         donor_phno: donorPhone,
         city_id: selectedCity,
       });
-
-      // Get current user and link to donor profile
-      const user = await getCurrentUser();
-      if (user) {
-        // Use supabase to link user to donor profile
-        // This would be implemented in your linkUserToProfile function
+      
+      const { error: insertError } = await supabase.from('donor').insert({
+        donor_id: donorId,
+        donor_name: donorName,
+        donor_age: parseInt(donorAge),
+        donor_bgrp: donorBloodGroup,
+        donor_sex: donorSex,
+        donor_phno: donorPhone,
+        city_id: selectedCity,
+      });
+      
+      if (insertError) {
+        console.error("Supabase insert error:", insertError);
+        throw new Error(`Database error: ${insertError.message} (Code: ${insertError.code})`);
+      }
+      
+      // Link user to donor profile
+      try {
+        const { error: linkError } = await supabase
+          .from('user_profiles')
+          .insert({
+            user_id: user.id,
+            profile_id: donorId,
+            profile_type: 'donor'
+          });
+          
+        if (linkError) {
+          console.error("Error linking user to donor profile:", linkError);
+        }
+      } catch (linkErr) {
+        console.error("Error in profile linking:", linkErr);
+        // Continue even if linking fails
       }
 
       toast({
@@ -106,7 +164,9 @@ export default function DonorRegistrationPage() {
       toast({
         variant: "destructive",
         title: "Registration Failed",
-        description: "There was a problem registering you as a donor. Please try again.",
+        description: error instanceof Error 
+          ? `Error: ${error.message}` 
+          : "There was a problem registering you as a donor. Please try again."
       });
     } finally {
       setIsSubmitting(false);
@@ -215,7 +275,7 @@ export default function DonorRegistrationPage() {
                     <SelectTrigger className="h-11 border-gray-300 focus:border-red-500 focus:ring-red-500 rounded-md">
                       <SelectValue placeholder="Select your city" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="max-h-60 overflow-y-auto z-50 bg-white">
                       {cities.map((city) => (
                         <SelectItem key={city.city_id} value={city.city_id}>
                           {city.city_name}

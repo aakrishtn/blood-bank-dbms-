@@ -35,6 +35,24 @@ export default function ReceiverRegistrationPage() {
       try {
         const citiesData = await cityAPI.getAllCities();
         setCities(citiesData);
+        
+        // If no cities found, try to seed the database
+        if (!citiesData || citiesData.length === 0) {
+          try {
+            console.log("No cities found. Attempting to seed the database...");
+            const response = await fetch('/api/seed/cities');
+            if (response.ok) {
+              // Fetch cities again after seeding
+              const newCitiesData = await cityAPI.getAllCities();
+              setCities(newCitiesData);
+              console.log("Cities seeded successfully!");
+            } else {
+              console.error("Failed to seed cities:", await response.text());
+            }
+          } catch (seedError) {
+            console.error("Error seeding cities:", seedError);
+          }
+        }
       } catch (error) {
         console.error("Error fetching cities:", error);
       }
@@ -198,12 +216,12 @@ export default function ReceiverRegistrationPage() {
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="receiverCity">City</Label>
+              <Label htmlFor="receiverCity" className="text-sm font-medium text-gray-900">City</Label>
               <Select value={selectedCity} onValueChange={setSelectedCity} required>
-                <SelectTrigger>
+                <SelectTrigger className="h-11 border-gray-300 focus:border-red-500 focus:ring-red-500 rounded-md">
                   <SelectValue placeholder="Select your city" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-60 overflow-y-auto z-50 bg-white">
                   {cities.map((city) => (
                     <SelectItem key={city.city_id} value={city.city_id}>
                       {city.city_name}

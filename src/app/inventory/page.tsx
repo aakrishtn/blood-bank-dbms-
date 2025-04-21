@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "@/components/ui/use-toast";
 import { getCurrentUser } from "@/lib/auth";
+import { bloodSampleAPI } from "@/lib/database";
 
 // Define types
 interface BloodUnit {
@@ -17,6 +18,23 @@ interface BloodUnit {
   status: 'available' | 'reserved' | 'used' | 'expired';
   donorId?: string;
   location: string;
+}
+
+interface BloodSampleFromDB {
+  sample_id: string;
+  blood_grp: string;
+  quantity?: number;
+  collection_date?: string;
+  expiry_date?: string;
+  status?: string;
+  donor_id?: string;
+  location?: string;
+  doctor?: {
+    doc_name: string;
+  };
+  manager?: {
+    m_name: string;
+  };
 }
 
 // Blood group colors
@@ -44,92 +62,8 @@ export default function InventoryPage() {
   const [filter, setFilter] = useState("all");
   const router = useRouter();
 
-  // Mock inventory data
-  const mockInventory: BloodUnit[] = [
-    {
-      id: "BU-001",
-      bloodGroup: "A+",
-      quantity: 3,
-      collectionDate: "2023-04-01",
-      expiryDate: "2023-05-31",
-      status: "available",
-      donorId: "D-123",
-      location: "Main Storage"
-    },
-    {
-      id: "BU-002",
-      bloodGroup: "O-",
-      quantity: 2,
-      collectionDate: "2023-04-05",
-      expiryDate: "2023-06-04",
-      status: "reserved",
-      donorId: "D-124",
-      location: "Main Storage"
-    },
-    {
-      id: "BU-003",
-      bloodGroup: "B+",
-      quantity: 1,
-      collectionDate: "2023-04-10",
-      expiryDate: "2023-06-09",
-      status: "available",
-      donorId: "D-125",
-      location: "East Wing"
-    },
-    {
-      id: "BU-004",
-      bloodGroup: "AB+",
-      quantity: 2,
-      collectionDate: "2023-03-15",
-      expiryDate: new Date(new Date().setDate(new Date().getDate() + 5)).toISOString().split('T')[0],
-      status: "available",
-      donorId: "D-126",
-      location: "West Wing"
-    },
-    {
-      id: "BU-005",
-      bloodGroup: "A-",
-      quantity: 1,
-      collectionDate: "2023-03-10",
-      expiryDate: new Date(new Date().setDate(new Date().getDate() - 10)).toISOString().split('T')[0],
-      status: "expired",
-      donorId: "D-127",
-      location: "Main Storage"
-    },
-    {
-      id: "BU-006",
-      bloodGroup: "O+",
-      quantity: 4,
-      collectionDate: "2023-04-15",
-      expiryDate: "2023-06-14",
-      status: "available",
-      donorId: "D-128",
-      location: "South Wing"
-    },
-    {
-      id: "BU-007",
-      bloodGroup: "B-",
-      quantity: 1,
-      collectionDate: "2023-04-12",
-      expiryDate: "2023-06-11",
-      status: "used",
-      donorId: "D-129",
-      location: "East Wing"
-    },
-    {
-      id: "BU-008",
-      bloodGroup: "AB-",
-      quantity: 1,
-      collectionDate: "2023-04-20",
-      expiryDate: new Date(new Date().setDate(new Date().getDate() + 3)).toISOString().split('T')[0],
-      status: "available",
-      donorId: "D-130",
-      location: "West Wing"
-    }
-  ];
-
   useEffect(() => {
-    const checkAuth = async () => {
+    const fetchInventoryData = async () => {
       try {
         const user = await getCurrentUser();
         if (!user) {
@@ -142,18 +76,36 @@ export default function InventoryPage() {
           return;
         }
 
-        // In real app, fetch inventory from database
-        // For now, using mock data
-        setInventory(mockInventory);
-        calculateStats(mockInventory);
+        // Fetch blood samples from the database
+        const bloodSamples = await bloodSampleAPI.getAllBloodSamples();
+        
+        // Transform the database data to match our BloodUnit interface
+        const transformedData: BloodUnit[] = bloodSamples.map((sample: BloodSampleFromDB) => ({
+          id: sample.sample_id,
+          bloodGroup: sample.blood_grp,
+          quantity: sample.quantity || 1,
+          collectionDate: sample.collection_date || new Date().toISOString().split('T')[0],
+          expiryDate: sample.expiry_date || new Date(new Date().setDate(new Date().getDate() + 35)).toISOString().split('T')[0],
+          status: (sample.status as 'available' | 'reserved' | 'used' | 'expired') || 'available',
+          donorId: sample.donor_id,
+          location: sample.location || 'Main Storage'
+        }));
+        
+        setInventory(transformedData);
+        calculateStats(transformedData);
         setIsLoading(false);
       } catch (error) {
-        console.error("Error checking authentication:", error);
+        console.error("Error fetching inventory data:", error);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to load inventory data. Please try again."
+        });
         setIsLoading(false);
       }
     };
 
-    checkAuth();
+    fetchInventoryData();
   }, [router]);
 
   const calculateStats = (units: BloodUnit[]) => {
@@ -248,7 +200,7 @@ export default function InventoryPage() {
       return { 
         bg: 'bg-orange-100', 
         text: 'text-orange-800',
-        label: `Expires in ${daysUntilExpiry} day${daysUntilExpiry !== 1 ? 's' : ''}`
+        label: 'Expiring Soon'
       };
     } else {
       return { 

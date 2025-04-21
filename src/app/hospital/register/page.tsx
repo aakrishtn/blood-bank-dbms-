@@ -32,6 +32,24 @@ export default function HospitalRegistrationPage() {
       try {
         const citiesData = await cityAPI.getAllCities();
         setCities(citiesData);
+        
+        // If no cities found, try to seed the database
+        if (!citiesData || citiesData.length === 0) {
+          try {
+            console.log("No cities found. Attempting to seed the database...");
+            const response = await fetch('/api/seed/cities');
+            if (response.ok) {
+              // Fetch cities again after seeding
+              const newCitiesData = await cityAPI.getAllCities();
+              setCities(newCitiesData);
+              console.log("Cities seeded successfully!");
+            } else {
+              console.error("Failed to seed cities:", await response.text());
+            }
+          } catch (seedError) {
+            console.error("Error seeding cities:", seedError);
+          }
+        }
       } catch (error) {
         console.error("Error fetching cities:", error);
       }
@@ -147,12 +165,12 @@ export default function HospitalRegistrationPage() {
             </div>
             
             <div className="space-y-2">
-              <Label htmlFor="hospitalCity">City</Label>
+              <Label htmlFor="hospitalCity" className="text-sm font-medium text-gray-900">City</Label>
               <Select value={selectedCity} onValueChange={setSelectedCity} required>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select city" />
+                <SelectTrigger className="h-11 border-gray-300 focus:border-red-500 focus:ring-red-500 rounded-md">
+                  <SelectValue placeholder="Select your city" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-60 overflow-y-auto z-50 bg-white">
                   {cities.map((city) => (
                     <SelectItem key={city.city_id} value={city.city_id}>
                       {city.city_name}
