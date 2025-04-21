@@ -1,0 +1,311 @@
+# BLOOD BANK MANAGEMENT SYSTEM
+# TRIGGERS, LIMITATIONS, AND PROCEDURES
+
+## 1. TRIGGERS
+
+### 1.1 Blood Specimen Status Update Trigger
+```sql
+CREATE TRIGGER update_blood_status
+AFTER UPDATE ON Blood_Specimen
+FOR EACH ROW
+BEGIN
+    IF NEW.status = 0 AND OLD.status = 1 THEN
+        -- Log the blood specimen status change
+        INSERT INTO BloodStatusLog (specimen_No, previous_status, new_status, change_date)
+        VALUES (NEW.specimen_No, OLD.status, NEW.status, NOW());
+    END IF;
+END;
+```
+This trigger logs when a blood specimen's status changes from available (1) to unavailable (0), which typically happens when blood is assigned to a recipient.
+
+### 1.2 Donor Registration Date Trigger
+```sql
+CREATE TRIGGER set_donor_regdate
+BEFORE INSERT ON Donor
+FOR EACH ROW
+BEGIN
+    IF NEW.bd_regdate IS NULL THEN
+        SET NEW.bd_regdate = CURDATE();
+    END IF;
+END;
+```
+This trigger automatically sets the registration date for new donors to the current date if not explicitly specified.
+
+### 1.3 Blood Request Validation Trigger
+```sql
+CREATE TRIGGER validate_blood_request
+BEFORE INSERT ON RecipientRequests
+FOR EACH ROW
+BEGIN
+    DECLARE blood_status INT;
+    SELECT status INTO blood_status FROM Blood_Specimen WHERE specimen_No = NEW.specimen_No;
+    
+    IF blood_status = 0 THEN
+        SIGNAL SQLSTATE '45000' 
+        SET MESSAGE_TEXT = 'Cannot request unavailable blood specimen';
+    END IF;
+END;
+```
+This trigger prevents requesting blood specimens that are already marked as unavailable.
+
+### 1.4 Hospital Blood Quantity Update Trigger
+```sql
+CREATE TRIGGER update_hospital_blood_quantity
+AFTER INSERT ON RecipientRequests
+FOR EACH ROW
+BEGIN
+    DECLARE blood_grp VARCHAR(10);
+    DECLARE hospital_id INT;
+    
+    -- Get blood group of the requested specimen
+    SELECT b_grp INTO blood_grp FROM Blood_Specimen WHERE specimen_No = NEW.specimen_No;
+    
+    -- Get hospital ID associated with the recipient
+    SELECT h.hosp_id INTO hospital_id 
+    FROM Hospital_Info h
+    JOIN Recipient r ON h.city_id = r.city_id
+    WHERE r.reci_id = NEW.reci_id
+    LIMIT 1;
+    
+    -- Update hospital needed quantity if it matches the blood group
+    IF hospital_id IS NOT NULL AND blood_grp = (SELECT hosp_needed_Bgrp FROM Hospital_Info WHERE hosp_id = hospital_id) THEN
+        UPDATE Hospital_Info 
+        SET hosp_needed_qnty = hosp_needed_qnty - 1 
+        WHERE hosp_id = hospital_id AND hosp_needed_qnty > 0;
+    END IF;
+END;
+```
+This trigger decreases the needed blood quantity for a hospital when a blood specimen is requested by a recipient from that hospital's city and the blood group matches.
+
+## 2. LIMITATIONS
+
+### 2.1 Data Integrity Limitations
+1. The system doesn't track blood expiration dates, which is critical for blood bank management.
+2. There's no mechanism to enforce age restrictions for donors and recipients (typically donors must be 18-65 years old).
+3. The database doesn't account for donation frequency limitations (donors typically can only donate every 56 days).
+4. No tracking of blood component separation (whole blood, plasma, platelets, etc.).
+5. No mechanism for handling donor deferral periods or permanent deferrals.
+
+### 2.2 Technical Limitations
+1. The database schema doesn't include user authentication or access control tables.
+2. No audit trails for tracking changes to critical data.
+3. Limited blood type compatibility checking for transfusions.
+4. No support for handling emergency blood requests with priority.
+5. The system doesn't track staff roles and permissions for different operations.
+
+### 2.3 Operational Limitations
+1. No tracking of blood transportation between collection centers, testing facilities, and hospitals.
+2. The system doesn't account for mobile blood donation camps.
+3. Limited reporting capabilities for inventory management.
+4. No mechanism for donor notification for upcoming donation eligibility.
+5. No integration with laboratory information systems for comprehensive testing results.
+
+## 3. PROCEDURES
+
+### 3.1 Blood Donation Procedure
+```sql
+CREATE PROCEDURE RegisterNewDonation(
+    IN p_donor_id INT,
+    IN p_blood_group VARCHAR(10),
+    IN p_staff_id INT,
+    IN p_manager_id INT,
+    IN p_disease_finder_id INT,
+    OUT p_specimen_id INT
+)
+BEGIN
+    DECLARE donor_exists INT;
+    
+    -- Check if donor exists
+    SELECT COUNT(*) INTO donor_exists FROM Donor WHERE bd_id = p_donor_id;
+    
+    IF donor_exists = 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Donor does not exist';
+    ELSE
+        -- Get the next specimen number
+        SET p_specimen_id = (SELECT COALESCE(MAX(specimen_No), 700) + 1 FROM Blood_Specimen);
+        
+        -- Insert new blood specimen
+        INSERT INTO Blood_Specimen (specimen_No, b_grp, status, M_id, dfind_id)
+        VALUES (p_specimen_id, p_blood_group, 1, p_manager_id, p_disease_finder_id);
+        
+        -- Update donor's last donation date
+        UPDATE Donor SET bd_regdate = CURDATE() WHERE bd_id = p_donor_id;
+        
+        -- Log the donation
+        INSERT INTO DonationLog (bd_id, specimen_No, donation_date, reco_id)
+        VALUES (p_donor_id, p_specimen_id, CURDATE(), p_staff_id);
+    END IF;
+END;
+```
+This procedure handles the registration of a new blood donation, creates a blood specimen record, and updates the donor's information.
+
+### 3.2 Blood Request Processing Procedure
+```sql
+CREATE PROCEDURE ProcessBloodRequest(
+    IN p_recipient_id INT,
+    IN p_blood_group VARCHAR(10),
+    IN p_quantity INT,
+    OUT p_request_status VARCHAR(50)
+)
+BEGIN
+    DECLARE available_specimen INT;
+    DECLARE blood_compatibility BOOLEAN;
+    DECLARE processed_count INT DEFAULT 0;
+    
+    -- Check recipient blood group compatibility with requested blood
+    SELECT reci_bgrp INTO @recipient_blood FROM Recipient WHERE reci_id = p_recipient_id;
+    
+    -- Simple compatibility check (can be expanded for full compatibility rules)
+    SET blood_compatibility = (p_blood_group = @recipient_blood) OR 
+                              (p_blood_group = 'O+' AND @recipient_blood LIKE '%+%') OR
+                              (p_blood_group = 'O-');
+    
+    IF NOT blood_compatibility THEN
+        SET p_request_status = 'Blood type incompatible';
+    ELSE
+        -- Find available specimens of the requested blood group
+        BEGIN
+            DECLARE done INT DEFAULT 0;
+            DECLARE specimen_id INT;
+            
+            DECLARE specimen_cursor CURSOR FOR
+                SELECT specimen_No FROM Blood_Specimen 
+                WHERE b_grp = p_blood_group AND status = 1
+                LIMIT p_quantity;
+                
+            DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1;
+            
+            OPEN specimen_cursor;
+            
+            specimen_loop: LOOP
+                FETCH specimen_cursor INTO specimen_id;
+                IF done THEN
+                    LEAVE specimen_loop;
+                END IF;
+                
+                -- Create a request record
+                INSERT INTO RecipientRequests (reci_id, specimen_No, request_date)
+                VALUES (p_recipient_id, specimen_id, CURDATE());
+                
+                -- Update specimen status
+                UPDATE Blood_Specimen SET status = 0 WHERE specimen_No = specimen_id;
+                
+                SET processed_count = processed_count + 1;
+            END LOOP;
+            
+            CLOSE specimen_cursor;
+        END;
+        
+        IF processed_count = 0 THEN
+            SET p_request_status = 'No matching blood available';
+        ELSEIF processed_count < p_quantity THEN
+            SET p_request_status = CONCAT('Partial request fulfilled: ', processed_count, ' of ', p_quantity);
+        ELSE
+            SET p_request_status = 'Request fulfilled completely';
+        END IF;
+    END IF;
+END;
+```
+This procedure processes a blood request from a recipient, checks blood type compatibility, and allocates available blood specimens.
+
+### 3.3 Hospital Blood Inventory Report Procedure
+```sql
+CREATE PROCEDURE GetHospitalBloodInventory(
+    IN p_hospital_id INT
+)
+BEGIN
+    SELECT 
+        bs.b_grp AS blood_group,
+        SUM(CASE WHEN bs.status = 1 THEN 1 ELSE 0 END) AS available_units,
+        h.hosp_needed_Bgrp AS needed_blood_group,
+        h.hosp_needed_qnty AS needed_quantity,
+        c.city_name AS hospital_city
+    FROM 
+        Hospital_Info h
+    JOIN 
+        City c ON h.city_id = c.city_id
+    LEFT JOIN 
+        Blood_Specimen bs ON bs.M_id IN (
+            SELECT M_id FROM BB_Manager WHERE M_id = h.M_id
+        )
+    WHERE 
+        h.hosp_id = p_hospital_id
+    GROUP BY 
+        bs.b_grp, h.hosp_needed_Bgrp, h.hosp_needed_qnty, c.city_name;
+END;
+```
+This procedure generates a report of the blood inventory for a specific hospital, showing available units by blood group and needed quantities.
+
+### 3.4 Donor Eligibility Check Procedure
+```sql
+CREATE PROCEDURE CheckDonorEligibility(
+    IN p_donor_id INT,
+    OUT p_eligible BOOLEAN,
+    OUT p_reason VARCHAR(100)
+)
+BEGIN
+    DECLARE donor_age INT;
+    DECLARE last_donation DATE;
+    DECLARE days_since_donation INT;
+    
+    -- Get donor information
+    SELECT 
+        bd_age, 
+        bd_regdate
+    INTO 
+        donor_age, 
+        last_donation
+    FROM 
+        Donor
+    WHERE 
+        bd_id = p_donor_id;
+    
+    -- Calculate days since last donation
+    SET days_since_donation = DATEDIFF(CURDATE(), last_donation);
+    
+    -- Check eligibility
+    IF donor_age < 18 THEN
+        SET p_eligible = FALSE;
+        SET p_reason = 'Donor must be at least 18 years old';
+    ELSEIF donor_age > 65 THEN
+        SET p_eligible = FALSE;
+        SET p_reason = 'Donor must be 65 years old or younger';
+    ELSEIF days_since_donation < 56 THEN
+        SET p_eligible = FALSE;
+        SET p_reason = CONCAT('Must wait ', 56 - days_since_donation, ' more days before next donation');
+    ELSE
+        SET p_eligible = TRUE;
+        SET p_reason = 'Eligible to donate';
+    END IF;
+END;
+```
+This procedure checks if a donor is eligible to donate based on age and time since their last donation.
+
+### 3.5 City Blood Availability Procedure
+```sql
+CREATE PROCEDURE GetCityBloodAvailability(
+    IN p_city_id INT
+)
+BEGIN
+    SELECT 
+        c.city_name,
+        bs.b_grp AS blood_group,
+        COUNT(CASE WHEN bs.status = 1 THEN 1 ELSE NULL END) AS available_units,
+        SUM(h.hosp_needed_qnty) AS total_needed_units
+    FROM 
+        City c
+    LEFT JOIN 
+        Hospital_Info h ON c.city_id = h.city_id
+    LEFT JOIN 
+        BB_Manager m ON h.M_id = m.M_id
+    LEFT JOIN 
+        Blood_Specimen bs ON m.M_id = bs.M_id
+    WHERE 
+        c.city_id = p_city_id
+    GROUP BY 
+        c.city_name, bs.b_grp
+    ORDER BY 
+        bs.b_grp;
+END;
+```
+This procedure reports on blood availability and needs within a specific city. 
