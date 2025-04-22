@@ -86,7 +86,7 @@ export default function DonorListDebugPage() {
           {selectedDonorId && (
             <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-md">
               <p className="text-green-700">
-                You've selected donor ID: <span className="font-mono">{selectedDonorId}</span>.
+                You&apos;ve selected donor ID: <span className="font-mono">{selectedDonorId}</span>.
                 Go back to the dashboard to see your profile.
               </p>
             </div>
@@ -136,9 +136,9 @@ export default function DonorListDebugPage() {
             <h3 className="font-medium text-yellow-800">Instructions</h3>
             <ol className="mt-2 list-decimal list-inside text-sm text-yellow-700 space-y-1">
               <li>Find the donor profile that should be associated with your account</li>
-              <li>Click the "Select" button next to that donor</li>
+              <li>Click the &quot;Select&quot; button next to that donor</li>
               <li>Return to the <a href="/dashboard" className="underline">dashboard</a> to see your profile</li>
-              <li>If your profile still doesn't appear, click the "Refresh Profile" button on the dashboard</li>
+              <li>If your profile still doesn&apos;t appear, click the &quot;Refresh Profile&quot; button on the dashboard</li>
             </ol>
           </div>
         </CardContent>

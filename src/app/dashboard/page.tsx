@@ -88,7 +88,6 @@ export default function DashboardPage() {
   const [bloodSamples, setBloodSamples] = useState<BloodSample[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [donorProfile, setDonorProfile] = useState<DonorProfile | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -197,24 +196,26 @@ export default function DashboardPage() {
             if (manualDonorId) {
               // Use the manually set donor ID
               const donorData = await donorAPI.getDonorById(manualDonorId);
-              setDonorProfile(donorData);
+              setProfileData(donorData);
+              toast({
+                title: "Profile refreshed",
+                description: "Your donor profile has been updated",
+              });
             } else {
-              // Fetch all donors and try to match by email
-              const donors = await donorAPI.getAllDonors();
-              if (donors && donors.length > 0) {
-                // Try to find donor with matching email
-                const currentUserEmail = user?.email?.toLowerCase();
-                const matchedDonor = currentUserEmail ? 
-                  donors.find((donor) => 
-                    donor.donor_email && donor.donor_email.toLowerCase() === currentUserEmail
-                  ) : null;
-                
-                if (matchedDonor) {
-                  setDonorProfile(matchedDonor);
-                } else {
-                  console.log("No donor profile found matching the current user's email");
-                }
-              }
+              toast({
+                variant: "destructive",
+                title: "Profile not found",
+                description: (
+                  <div>
+                    <p>Your donor profile couldn&apos;t be found automatically.</p>
+                    <p className="mt-2">
+                      <a href="/debug/donor-list" className="underline font-medium">
+                        Click here to select your profile manually
+                      </a>
+                    </p>
+                  </div>
+                ),
+              });
             }
           } catch (error) {
             console.error("Error fetching donor profile:", error);
@@ -258,7 +259,7 @@ export default function DashboardPage() {
         if (manualDonorId) {
           // Use the manually set donor ID
           const donorData = await donorAPI.getDonorById(manualDonorId);
-          setDonorProfile(donorData);
+          setProfileData(donorData);
           toast({
             title: "Profile refreshed",
             description: "Your donor profile has been updated",
@@ -269,7 +270,7 @@ export default function DashboardPage() {
             title: "Profile not found",
             description: (
               <div>
-                <p>Your donor profile couldn't be found automatically.</p>
+                <p>Your donor profile couldn&apos;t be found automatically.</p>
                 <p className="mt-2">
                   <a href="/debug/donor-list" className="underline font-medium">
                     Click here to select your profile manually

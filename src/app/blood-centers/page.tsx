@@ -175,7 +175,18 @@ export default function BloodCentersPage() {
   }, []);
 
   // Function to convert database blood center to our interface
-  const mapDatabaseCenterToInterface = (dbCenter: any): BloodCenter => {
+  const mapDatabaseCenterToInterface = (dbCenter: {
+    center_id: string;
+    center_name: string;
+    coordinates?: string; 
+    address?: string;
+    city?: { city_name: string };
+    phone?: string;
+    operating_hours?: string;
+    available_services?: string[];
+    api_source?: string;
+    distance_km?: number;
+  }): BloodCenter => {
     // Parse the coordinates point type from PostgreSQL 
     let lat = 0, lng = 0;
     if (dbCenter.coordinates) {
@@ -220,7 +231,7 @@ export default function BloodCentersPage() {
           operating_hours: center.hours,
           available_services: center.availableServices,
           api_source: center.source
-        }).catch(err => {
+        }).catch(() => {
           // Likely already exists - not a problem
           console.log("Center may already exist in database:", center.id);
         });
@@ -232,7 +243,7 @@ export default function BloodCentersPage() {
   };
   
   // Modified function to try getting centers from database first
-  const fetchBloodCenters = async (coordinates: { lat: number; lng: number }) => {
+  const fetchBloodCenters = useCallback(async (coordinates: { lat: number; lng: number }) => {
     try {
       // First try to get centers from our database by proximity
       try {
@@ -294,7 +305,7 @@ export default function BloodCentersPage() {
       console.error("Error in fetchBloodCenters:", error);
       throw error;
     }
-  };
+  }, [setUsingCachedData, setApiSource]);
 
   useEffect(() => {
     // Fetch blood centers when user coordinates are available
@@ -322,7 +333,7 @@ export default function BloodCentersPage() {
           setIsLoading(false);
         });
     }
-  }, [userCoordinates, handleApiFallback]);
+  }, [userCoordinates, handleApiFallback, fetchBloodCenters]);
 
   const fetchFromGeoapify = async (coordinates: { lat: number; lng: number }) => {
     const radius = 15000; // 15 km radius
@@ -347,7 +358,6 @@ export default function BloodCentersPage() {
   };
 
   const fetchFromTomTom = async (coordinates: { lat: number; lng: number }) => {
-    const categories = "healthcare";
     const radius = 15000; // 15 km
     const limit = 20;
     const apiKey = process.env.NEXT_PUBLIC_TOMTOM_API_KEY;
