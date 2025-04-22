@@ -464,4 +464,101 @@ export const doctorAPI = {
     const { error } = await supabase.from('doctor').delete().eq('doc_id', doctorId);
     if (error) throw error;
   }
+};
+
+// Blood Center API
+export const bloodCenterAPI = {
+  async getAllBloodCenters() {
+    const { data, error } = await supabase
+      .from('blood_center')
+      .select('*, city(city_name)');
+    if (error) throw error;
+    return data;
+  },
+  
+  async getBloodCenterById(centerId: string) {
+    const { data, error } = await supabase
+      .from('blood_center')
+      .select('*, city(city_name)')
+      .eq('center_id', centerId)
+      .single();
+    if (error) throw error;
+    return data;
+  },
+  
+  async getBloodCentersByCity(cityId: string) {
+    const { data, error } = await supabase
+      .from('blood_center')
+      .select('*, city(city_name)')
+      .eq('city_id', cityId);
+    if (error) throw error;
+    return data;
+  },
+  
+  async addBloodCenter(center: {
+    center_id: string;
+    center_name: string;
+    address?: string;
+    city_id?: string;
+    coordinates?: string; // Format as 'POINT(lng lat)'
+    phone?: string;
+    operating_hours?: string;
+    available_services?: string[];
+    api_source?: string;
+  }) {
+    const { data, error } = await supabase.from('blood_center').insert(center);
+    if (error) throw error;
+    return data;
+  },
+  
+  async updateBloodCenter(centerId: string, center: Partial<{
+    center_name: string;
+    address: string;
+    city_id: string;
+    coordinates: string;
+    phone: string;
+    operating_hours: string;
+    available_services: string[];
+    api_source: string;
+    last_updated: string;
+  }>) {
+    // Set last_updated to current timestamp
+    const updateData = {
+      ...center,
+      last_updated: new Date().toISOString()
+    };
+    
+    const { data, error } = await supabase
+      .from('blood_center')
+      .update(updateData)
+      .eq('center_id', centerId);
+    if (error) throw error;
+    return data;
+  },
+  
+  async deleteBloodCenter(centerId: string) {
+    const { error } = await supabase.from('blood_center').delete().eq('center_id', centerId);
+    if (error) throw error;
+  },
+  
+  // Get blood centers by proximity (requires PostGIS extension in Supabase)
+  async getBloodCentersByProximity(lat: number, lng: number, radiusKm: number = 15) {
+    try {
+      // This query uses PostGIS to find centers within a certain radius
+      const { data, error } = await supabase.rpc('find_centers_by_location', {
+        lat_param: lat,
+        lng_param: lng,
+        radius_km: radiusKm
+      });
+      
+      if (error) throw error;
+      return data;
+    } catch (e) {
+      console.error("Error in proximity search, falling back to regular query:", e);
+      // Fallback to regular query if PostGIS function is not available
+      const { data, error } = await supabase.from('blood_center').select('*, city(city_name)');
+      if (error) throw error;
+      return data;
+    }
+  }
 }; 

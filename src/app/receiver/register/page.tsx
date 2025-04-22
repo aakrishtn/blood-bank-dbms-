@@ -89,6 +89,40 @@ export default function ReceiverRegistrationPage() {
       // Current date for registration
       const regDate = new Date().toISOString().split('T')[0];
       
+      // Get current user before adding receiver (to update metadata)
+      const user = await getCurrentUser();
+      if (!user) {
+        toast({
+          variant: "destructive",
+          title: "Authentication Error",
+          description: "Please log in again to continue.",
+        });
+        router.push("/login");
+        return;
+      }
+      
+      // Update the user metadata to set role as receiver
+      try {
+        // Call the API to update user role in Supabase
+        const response = await fetch('/api/users/update-role', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userId: user.id,
+            role: 'receiver'
+          }),
+        });
+        
+        if (!response.ok) {
+          console.error("Failed to update user role");
+        }
+      } catch (metadataError) {
+        console.error("Error updating user metadata:", metadataError);
+      }
+      
+      // Add the receiver record
       await receiverAPI.addReceiver({
         receiver_id: receiverId,
         receiver_name: receiverName,
@@ -100,22 +134,22 @@ export default function ReceiverRegistrationPage() {
         city_id: selectedCity,
       });
 
-      // Get current user and link to receiver profile
-      const user = await getCurrentUser();
-      if (user) {
-        // Use supabase to link user to receiver profile
-        // This would be implemented in your linkUserToProfile function
-      }
-
+      // Link user to receiver profile if needed
+      // This would be implemented in your linkUserToProfile function
+      
       toast({
         title: "Registration Successful",
         description: "You have been registered as a blood receiver successfully.",
       });
       
-      // Find compatible donors - this would be used in a real implementation
-      // await receiverAPI.matchDonors(receiverId);
+      // Store key information in localStorage for easy retrieval
+      window.localStorage.setItem('userRole', 'receiver');
+      window.localStorage.setItem('receiverId', receiverId);
+      window.localStorage.setItem('receiverBloodType', receiverBloodGroup);
+      console.log(`Registered as receiver with blood type ${receiverBloodGroup} and ID ${receiverId}`);
       
-      router.push("/dashboard");
+      // Redirect to matched donors page
+      router.push("/receiver/matched-donors");
     } catch (error) {
       console.error("Registration error:", error);
       toast({
@@ -177,10 +211,10 @@ export default function ReceiverRegistrationPage() {
                 <SelectTrigger>
                   <SelectValue placeholder="Select gender" />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="M">Male</SelectItem>
-                  <SelectItem value="F">Female</SelectItem>
-                  <SelectItem value="O">Other</SelectItem>
+                <SelectContent className="bg-gray-100 text-gray-900 border border-gray-300">
+                  <SelectItem value="M" className="text-gray-900 hover:bg-gray-200">Male</SelectItem>
+                  <SelectItem value="F" className="text-gray-900 hover:bg-gray-200">Female</SelectItem>
+                  <SelectItem value="O" className="text-gray-900 hover:bg-gray-200">Other</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -191,15 +225,15 @@ export default function ReceiverRegistrationPage() {
                 <SelectTrigger>
                   <SelectValue placeholder="Select blood group" />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="A+">A+</SelectItem>
-                  <SelectItem value="A-">A-</SelectItem>
-                  <SelectItem value="B+">B+</SelectItem>
-                  <SelectItem value="B-">B-</SelectItem>
-                  <SelectItem value="AB+">AB+</SelectItem>
-                  <SelectItem value="AB-">AB-</SelectItem>
-                  <SelectItem value="O+">O+</SelectItem>
-                  <SelectItem value="O-">O-</SelectItem>
+                <SelectContent className="bg-gray-100 text-gray-900 border border-gray-300">
+                  <SelectItem value="A+" className="text-gray-900 hover:bg-gray-200">A+</SelectItem>
+                  <SelectItem value="A-" className="text-gray-900 hover:bg-gray-200">A-</SelectItem>
+                  <SelectItem value="B+" className="text-gray-900 hover:bg-gray-200">B+</SelectItem>
+                  <SelectItem value="B-" className="text-gray-900 hover:bg-gray-200">B-</SelectItem>
+                  <SelectItem value="AB+" className="text-gray-900 hover:bg-gray-200">AB+</SelectItem>
+                  <SelectItem value="AB-" className="text-gray-900 hover:bg-gray-200">AB-</SelectItem>
+                  <SelectItem value="O+" className="text-gray-900 hover:bg-gray-200">O+</SelectItem>
+                  <SelectItem value="O-" className="text-gray-900 hover:bg-gray-200">O-</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -221,9 +255,9 @@ export default function ReceiverRegistrationPage() {
                 <SelectTrigger className="h-11 border-gray-300 focus:border-red-500 focus:ring-red-500 rounded-md">
                   <SelectValue placeholder="Select your city" />
                 </SelectTrigger>
-                <SelectContent className="max-h-60 overflow-y-auto z-50 bg-white">
+                <SelectContent className="max-h-60 overflow-y-auto z-50 bg-gray-100 text-gray-900 border border-gray-300">
                   {cities.map((city) => (
-                    <SelectItem key={city.city_id} value={city.city_id}>
+                    <SelectItem key={city.city_id} value={city.city_id} className="text-gray-900 hover:bg-gray-200">
                       {city.city_name}
                     </SelectItem>
                   ))}

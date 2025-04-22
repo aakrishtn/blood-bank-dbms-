@@ -72,6 +72,20 @@ CREATE TABLE blood_sample (
   doc_id VARCHAR REFERENCES doctor(doc_id)
 );
 
+-- Blood Center table
+CREATE TABLE blood_center (
+  center_id VARCHAR PRIMARY KEY,
+  center_name VARCHAR NOT NULL,
+  address VARCHAR,
+  city_id VARCHAR REFERENCES city(city_id),
+  coordinates POINT,
+  phone VARCHAR,
+  operating_hours VARCHAR,
+  available_services VARCHAR[],
+  api_source VARCHAR,
+  last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Add triggers and procedures
 
 -- Trigger to validate blood group
@@ -164,6 +178,7 @@ ALTER TABLE staff ENABLE ROW LEVEL SECURITY;
 ALTER TABLE manager ENABLE ROW LEVEL SECURITY;
 ALTER TABLE doctor ENABLE ROW LEVEL SECURITY;
 ALTER TABLE city ENABLE ROW LEVEL SECURITY;
+ALTER TABLE blood_center ENABLE ROW LEVEL SECURITY;
 
 -- Create policies
 -- Example: Allow authenticated users to read all donors
@@ -190,10 +205,53 @@ USING (EXISTS (
   WHERE user_id = auth.uid() AND profile_type = 'staff'
 ));
 
+-- Example: Allow authenticated users to read all blood centers
+CREATE POLICY "Allow authenticated users to read all blood centers"
+ON blood_center FOR SELECT
+TO authenticated
+USING (true);
+
 -- Create indexes for improved query performance
 CREATE INDEX idx_donor_bgrp ON donor(donor_bgrp);
 CREATE INDEX idx_receiver_bgrp ON receiver(r_bgrp);
 CREATE INDEX idx_blood_sample_grp ON blood_sample(blood_grp);
 CREATE INDEX idx_hospital_city ON hospital(city_id);
 CREATE INDEX idx_donor_city ON donor(city_id);
-CREATE INDEX idx_receiver_city ON receiver(city_id); 
+CREATE INDEX idx_receiver_city ON receiver(city_id);
+CREATE INDEX idx_blood_center_city ON blood_center(city_id);
+
+-- Function to find blood centers by proximity (requires PostGIS extension)
+CREATE OR REPLACE FUNCTION find_centers_by_location(lat_param FLOAT, lng_param FLOAT, radius_km FLOAT)
+RETURNS TABLE (
+  center_id VARCHAR,
+  center_name VARCHAR,
+  address VARCHAR,
+  city_id VARCHAR,
+  coordinates POINT,
+  phone VARCHAR,
+  operating_hours VARCHAR,
+  available_services VARCHAR[],
+  api_source VARCHAR,
+  last_updated TIMESTAMP WITH TIME ZONE,
+  distance_km FLOAT
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    bc.*,
+    ST_Distance(
+      bc.coordinates::geography, 
+      ST_SetSRID(ST_MakePoint(lng_param, lat_param), 4326)::geography
+    ) / 1000 AS distance_km
+  FROM 
+    blood_center bc
+  WHERE 
+    ST_DWithin(
+      bc.coordinates::geography,
+      ST_SetSRID(ST_MakePoint(lng_param, lat_param), 4326)::geography,
+      radius_km * 1000
+    )
+  ORDER BY 
+    distance_km;
+END;
+$$ LANGUAGE plpgsql; 

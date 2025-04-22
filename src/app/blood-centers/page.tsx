@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
 import { toast } from "@/components/ui/use-toast";
+import { bloodCenterAPI } from "@/lib/database";
 
 // Interface for blood centers from Geoapify API
 interface BloodCenter {
@@ -107,6 +108,7 @@ export default function BloodCentersPage() {
   const [error, setError] = useState<string | null>(null);
   const [locationPermission, setLocationPermission] = useState<'granted' | 'denied' | 'prompt'>('prompt');
   const [apiSource, setApiSource] = useState<string | null>(null);
+  const [usingCachedData, setUsingCachedData] = useState(false);
   
   // Function to handle fallback if APIs fail
   const handleApiFallback = useCallback(() => {
@@ -172,26 +174,138 @@ export default function BloodCentersPage() {
     getUserLocation();
   }, []);
 
+  // Function to convert database blood center to our interface
+  const mapDatabaseCenterToInterface = (dbCenter: any): BloodCenter => {
+    // Parse the coordinates point type from PostgreSQL 
+    let lat = 0, lng = 0;
+    if (dbCenter.coordinates) {
+      try {
+        // Assuming coordinates is stored as a point "(lng,lat)"
+        const pointStr = dbCenter.coordinates.replace('(', '').replace(')', '');
+        const [lngStr, latStr] = pointStr.split(',');
+        lng = parseFloat(lngStr);
+        lat = parseFloat(latStr);
+      } catch (e) {
+        console.error("Error parsing coordinates:", e);
+      }
+    }
+    
+    return {
+      id: dbCenter.center_id,
+      name: dbCenter.center_name,
+      address: dbCenter.address || 'Address not available',
+      city: dbCenter.city?.city_name || 'City not available',
+      state: 'State not available', // Would need to extend schema to store this
+      zipCode: 'Zip code not available', // Would need to extend schema to store this
+      phone: dbCenter.phone || 'Phone not available',
+      hours: dbCenter.operating_hours || 'Hours not available',
+      availableServices: dbCenter.available_services || ['Whole Blood Donation'],
+      distance: dbCenter.distance_km,
+      coordinates: { lat, lng },
+      source: dbCenter.api_source || 'Database'
+    };
+  };
+  
+  // Function to store blood centers in database for future use
+  const storeCentersInDatabase = async (centers: BloodCenter[]) => {
+    try {
+      for (const center of centers) {
+        await bloodCenterAPI.addBloodCenter({
+          center_id: center.id,
+          center_name: center.name,
+          address: center.address,
+          city_id: null, // Would need city lookup/creation logic
+          coordinates: `POINT(${center.coordinates.lng} ${center.coordinates.lat})`,
+          phone: center.phone,
+          operating_hours: center.hours,
+          available_services: center.availableServices,
+          api_source: center.source
+        }).catch(err => {
+          // Likely already exists - not a problem
+          console.log("Center may already exist in database:", center.id);
+        });
+      }
+      console.log("Successfully cached blood centers data");
+    } catch (error) {
+      console.error("Error storing centers in database:", error);
+    }
+  };
+  
+  // Modified function to try getting centers from database first
+  const fetchBloodCenters = async (coordinates: { lat: number; lng: number }) => {
+    try {
+      // First try to get centers from our database by proximity
+      try {
+        const dbCenters = await bloodCenterAPI.getBloodCentersByProximity(
+          coordinates.lat, 
+          coordinates.lng, 
+          15 // 15km radius
+        );
+        
+        if (dbCenters && dbCenters.length > 0) {
+          console.log("Using cached centers from database");
+          setUsingCachedData(true);
+          setApiSource('Database');
+          return dbCenters.map(mapDatabaseCenterToInterface);
+        }
+      } catch (dbError) {
+        console.log("No cached centers available:", dbError);
+        setUsingCachedData(false);
+      }
+      
+      // If no results from database, try external APIs
+      // Check if API keys are available
+      const geoapifyKey = process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY;
+      const tomtomKey = process.env.NEXT_PUBLIC_TOMTOM_API_KEY;
+      
+      if (!geoapifyKey && !tomtomKey) {
+        toast({
+          variant: "destructive",
+          title: "API Configuration Missing",
+          description: "Contact system administrator. API keys are not configured.",
+        });
+        setError("API configuration missing. Please try again later.");
+        return [];
+      }
+      
+      // Try to fetch from Geoapify first if key is available
+      let centers: BloodCenter[] = [];
+      if (geoapifyKey) {
+        centers = await fetchFromGeoapify(coordinates);
+        if (centers.length > 0) {
+          setApiSource('Geoapify');
+          // Store in database for future use
+          storeCentersInDatabase(centers);
+        }
+      }
+      
+      // If Geoapify returns no results or isn't available, try TomTom as fallback
+      if (centers.length === 0 && tomtomKey) {
+        centers = await fetchFromTomTom(coordinates);
+        if (centers.length > 0) {
+          setApiSource('TomTom');
+          // Store in database for future use
+          storeCentersInDatabase(centers);
+        }
+      }
+      
+      return centers;
+    } catch (error) {
+      console.error("Error in fetchBloodCenters:", error);
+      throw error;
+    }
+  };
+
   useEffect(() => {
     // Fetch blood centers when user coordinates are available
     if (userCoordinates) {
-      const fetchBloodCenters = async () => {
-        try {
-          // Try to fetch from Geoapify first
-          let centers: BloodCenter[] = await fetchFromGeoapify(userCoordinates);
-          
-          // If Geoapify returns no results, try TomTom as fallback
+      setIsLoading(true);
+      
+      fetchBloodCenters(userCoordinates)
+        .then(centers => {
           if (centers.length === 0) {
-            centers = await fetchFromTomTom(userCoordinates);
-            if (centers.length > 0) {
-              setApiSource('TomTom');
-            }
-          } else {
-            setApiSource('Geoapify');
-          }
-          
-          if (centers.length === 0) {
-            throw new Error("No blood centers found nearby");
+            setError("No blood centers found nearby. Try searching a different location.");
+            return;
           }
           
           setBloodCenters(centers);
@@ -199,20 +313,18 @@ export default function BloodCentersPage() {
           // Calculate distance from user and sort by proximity
           const centersWithDistance = calculateCenterDistances(centers, userCoordinates);
           setCenterWithDistance(centersWithDistance);
-          
-          setIsLoading(false);
-        } catch (error) {
+        })
+        .catch(error => {
           console.error("Error fetching blood centers:", error);
           handleApiFallback();
-        }
-      };
-      
-      fetchBloodCenters();
+        })
+        .finally(() => {
+          setIsLoading(false);
+        });
     }
   }, [userCoordinates, handleApiFallback]);
 
   const fetchFromGeoapify = async (coordinates: { lat: number; lng: number }) => {
-    const categories = "healthcare.blood_donation";
     const radius = 15000; // 15 km radius
     const limit = 20;
     const apiKey = process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY;
@@ -222,7 +334,7 @@ export default function BloodCentersPage() {
       return [];
     }
     
-    const url = `https://api.geoapify.com/v2/places?categories=${categories}&filter=circle:${coordinates.lng},${coordinates.lat},${radius}&limit=${limit}&apiKey=${apiKey}`;
+    const url = `https://api.geoapify.com/v2/places?categories=healthcare.blood_donation&filter=circle:${coordinates.lng},${coordinates.lat},${radius}&limit=${limit}&apiKey=${apiKey}`;
     
     const response = await fetch(url);
     
@@ -353,12 +465,31 @@ export default function BloodCentersPage() {
     }
     
     setIsLoading(true);
+    setError(null);
+    
+    // Check if API keys are available
+    const geoapifyKey = process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY;
+    
+    if (!geoapifyKey) {
+      toast({
+        variant: "warning",
+        title: "Limited Search Capability",
+        description: "Geocoding service not available. Using approximate search.",
+      });
+      setIsLoading(false);
+      return;
+    }
     
     // Geocode the search term to coordinates
-    const geocodeUrl = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(searchTerm)}&apiKey=${process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY}`;
+    const geocodeUrl = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(searchTerm)}&apiKey=${geoapifyKey}`;
     
     fetch(geocodeUrl)
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) {
+          throw new Error(`Geocoding error: ${res.status}`);
+        }
+        return res.json();
+      })
       .then(data => {
         if (data.features && data.features.length > 0) {
           const coords = data.features[0].geometry.coordinates;
@@ -366,25 +497,15 @@ export default function BloodCentersPage() {
           setUserCoordinates(newCoords);
           
           // Fetch blood centers for the new coordinates
-          return fetchFromGeoapify(newCoords);
+          return fetchBloodCenters(newCoords);
         } else {
           throw new Error("Location not found");
         }
       })
       .then(centers => {
         if (centers.length === 0) {
-          return fetchFromTomTom(userCoordinates!);
-        }
-        setApiSource('Geoapify');
-        return centers;
-      })
-      .then(centers => {
-        if (centers.length === 0) {
-          throw new Error("No blood centers found near this location");
-        }
-        
-        if (apiSource !== 'Geoapify') {
-          setApiSource('TomTom');
+          setError("No blood centers found near this location. Try a different search term.");
+          return [];
         }
         
         setBloodCenters(centers);
@@ -400,6 +521,7 @@ export default function BloodCentersPage() {
           title: "Search error",
           description: err.message || "Could not find blood centers near this location.",
         });
+        setError("Error finding centers. Please try a different search term.");
       })
       .finally(() => {
         setIsLoading(false);
@@ -416,7 +538,7 @@ export default function BloodCentersPage() {
           </p>
           {apiSource && (
             <div className="text-xs text-gray-600 mt-2">
-              Data provided by {apiSource} API
+              Data provided by {apiSource} {usingCachedData && "(cached)"} 
             </div>
           )}
         </div>

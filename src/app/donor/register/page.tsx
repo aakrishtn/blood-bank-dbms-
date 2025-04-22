@@ -65,6 +65,12 @@ export default function DonorRegistrationPage() {
         const user = await getCurrentUser();
         if (!user) {
           router.push("/login");
+          return;
+        }
+        
+        // Pre-fill phone number with user's email to ensure matching
+        if (user.email) {
+          setDonorPhone(user.email);
         }
       } catch (error) {
         console.error("Auth error:", error);
@@ -109,6 +115,24 @@ export default function DonorRegistrationPage() {
         return;
       }
       
+      // Handle email length limitation for donor_phno field (varchar(15) in the database)
+      // Generate a unique identifier that fits within 15 characters
+      // We'll use first 5 chars + last 5 chars of email + 5 random chars
+      const emailForPhone = user.email || "";
+      let phoneToUse = "";
+      
+      if (emailForPhone.length > 15) {
+        // Create a shorter unique identifier that still relates to the email
+        const firstPart = emailForPhone.substring(0, 5);
+        const lastPart = emailForPhone.substring(emailForPhone.length - 5);
+        const randomPart = Math.random().toString(36).substring(2, 7);
+        phoneToUse = `${firstPart}${lastPart.substring(0, 3)}${randomPart.substring(0, 3)}`.substring(0, 15);
+        
+        console.log(`Email too long (${emailForPhone.length} chars), using shortened version: ${phoneToUse}`);
+      } else {
+        phoneToUse = emailForPhone;
+      }
+      
       // Create donor record
       console.log("Adding donor with data:", {
         donor_id: donorId,
@@ -116,7 +140,7 @@ export default function DonorRegistrationPage() {
         donor_age: parseInt(donorAge),
         donor_bgrp: donorBloodGroup,
         donor_sex: donorSex,
-        donor_phno: donorPhone,
+        donor_phno: phoneToUse,
         city_id: selectedCity,
       });
       
@@ -126,7 +150,7 @@ export default function DonorRegistrationPage() {
         donor_age: parseInt(donorAge),
         donor_bgrp: donorBloodGroup,
         donor_sex: donorSex,
-        donor_phno: donorPhone,
+        donor_phno: phoneToUse,
         city_id: selectedCity,
       });
       
@@ -151,6 +175,33 @@ export default function DonorRegistrationPage() {
       } catch (linkErr) {
         console.error("Error in profile linking:", linkErr);
         // Continue even if linking fails
+      }
+
+      // Update the user metadata to set role as donor
+      try {
+        // Call the API to update user role in Supabase
+        const response = await fetch('/api/users/update-role', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userId: user.id,
+            role: 'donor',
+            donorDetails: {
+              donor_id: donorId,
+              donor_name: donorName,
+              donor_bgrp: donorBloodGroup,
+              donor_age: parseInt(donorAge)
+            }
+          }),
+        });
+        
+        if (!response.ok) {
+          console.error("Failed to update user role");
+        }
+      } catch (metadataError) {
+        console.error("Error updating user metadata:", metadataError);
       }
 
       toast({
@@ -230,10 +281,10 @@ export default function DonorRegistrationPage() {
                     <SelectTrigger className="h-11 border-gray-300 focus:border-red-500 focus:ring-red-500 rounded-md">
                       <SelectValue placeholder="Select gender" />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="M">Male</SelectItem>
-                      <SelectItem value="F">Female</SelectItem>
-                      <SelectItem value="O">Other</SelectItem>
+                    <SelectContent className="bg-gray-100 text-gray-900 border border-gray-300">
+                      <SelectItem value="M" className="text-gray-900 hover:bg-gray-200">Male</SelectItem>
+                      <SelectItem value="F" className="text-gray-900 hover:bg-gray-200">Female</SelectItem>
+                      <SelectItem value="O" className="text-gray-900 hover:bg-gray-200">Other</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -244,29 +295,30 @@ export default function DonorRegistrationPage() {
                     <SelectTrigger className="h-11 border-gray-300 focus:border-red-500 focus:ring-red-500 rounded-md">
                       <SelectValue placeholder="Select blood group" />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="A+">A+</SelectItem>
-                      <SelectItem value="A-">A-</SelectItem>
-                      <SelectItem value="B+">B+</SelectItem>
-                      <SelectItem value="B-">B-</SelectItem>
-                      <SelectItem value="AB+">AB+</SelectItem>
-                      <SelectItem value="AB-">AB-</SelectItem>
-                      <SelectItem value="O+">O+</SelectItem>
-                      <SelectItem value="O-">O-</SelectItem>
+                    <SelectContent className="bg-gray-100 text-gray-900 border border-gray-300">
+                      <SelectItem value="A+" className="text-gray-900 hover:bg-gray-200">A+</SelectItem>
+                      <SelectItem value="A-" className="text-gray-900 hover:bg-gray-200">A-</SelectItem>
+                      <SelectItem value="B+" className="text-gray-900 hover:bg-gray-200">B+</SelectItem>
+                      <SelectItem value="B-" className="text-gray-900 hover:bg-gray-200">B-</SelectItem>
+                      <SelectItem value="AB+" className="text-gray-900 hover:bg-gray-200">AB+</SelectItem>
+                      <SelectItem value="AB-" className="text-gray-900 hover:bg-gray-200">AB-</SelectItem>
+                      <SelectItem value="O+" className="text-gray-900 hover:bg-gray-200">O+</SelectItem>
+                      <SelectItem value="O-" className="text-gray-900 hover:bg-gray-200">O-</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 
                 <div className="space-y-2">
-                  <Label htmlFor="donorPhone" className="text-sm font-medium text-gray-900">Phone Number</Label>
+                  <Label htmlFor="donorPhone" className="text-sm font-medium text-gray-900">Email Address</Label>
                   <Input
                     id="donorPhone"
-                    placeholder="Your phone number"
+                    placeholder="Your email address"
                     value={donorPhone}
                     onChange={(e) => setDonorPhone(e.target.value)}
-                    required
-                    className="h-11 border-gray-300 focus:border-red-500 focus:ring-red-500 rounded-md"
+                    disabled={true}
+                    className="h-11 border-gray-300 focus:border-red-500 focus:ring-red-500 rounded-md bg-gray-50"
                   />
+                  <p className="text-xs text-gray-500">This field uses your login email to link your profile</p>
                 </div>
                 
                 <div className="space-y-2">
@@ -275,9 +327,9 @@ export default function DonorRegistrationPage() {
                     <SelectTrigger className="h-11 border-gray-300 focus:border-red-500 focus:ring-red-500 rounded-md">
                       <SelectValue placeholder="Select your city" />
                     </SelectTrigger>
-                    <SelectContent className="max-h-60 overflow-y-auto z-50 bg-white">
+                    <SelectContent className="max-h-60 overflow-y-auto z-50 bg-gray-100 text-gray-900 border border-gray-300">
                       {cities.map((city) => (
-                        <SelectItem key={city.city_id} value={city.city_id}>
+                        <SelectItem key={city.city_id} value={city.city_id} className="text-gray-900 hover:bg-gray-200">
                           {city.city_name}
                         </SelectItem>
                       ))}

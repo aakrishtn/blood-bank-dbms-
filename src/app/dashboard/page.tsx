@@ -8,12 +8,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import Link from "next/link";
+import { getManualDonorId } from "@/lib/donation-profile-manager";
 
 // Define types for our data
 interface UserData {
   email?: string;
   user_metadata?: {
     role?: string;
+    donorId?: string;
   };
 }
 
@@ -84,70 +87,147 @@ export default function DashboardPage() {
   const [bloodReceivers, setBloodReceivers] = useState<ReceiverProfile[]>([]);
   const [bloodSamples, setBloodSamples] = useState<BloodSample[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [donorProfile, setDonorProfile] = useState<DonorProfile | null>(null);
   const router = useRouter();
 
   useEffect(() => {
-    const fetchUserData = async () => {
+    const fetchData = async () => {
+      setIsLoading(true);
       try {
         const user = await getCurrentUser();
+        
         if (!user) {
-          router.push("/login");
+          router.push('/login');
           return;
         }
-
-        // Convert the user object to match our UserData interface
-        const userData: UserData = {
-          email: user.email || '',
-          user_metadata: user.user_metadata || {},
-        };
         
-        setUserData(userData);
+        setUserData(user);
+        const userRole = user.user_metadata?.role || 'guest';
+        setUserRole(userRole);
         
-        // In real implementation, you would fetch the user's role and linked profile data
-        // For demo purposes, we'll assume the role from user's metadata
-        const role = user.user_metadata?.role || "donor";
-        setUserRole(role);
-        
-        // Fetch relevant data based on user role
-        if (role === "donor") {
-          const donors = await donorAPI.getAllDonors();
-          setBloodDonors(donors);
-          // You would fetch the specific donor profile linked to this user
-          // For demo, we'll just use the first donor
-          if (donors.length > 0) {
-            setProfileData(donors[0]);
+        // Fetch relevant profile based on user role
+        try {
+          if (userRole === 'donor') {
+            const donors = await donorAPI.getAllDonors();
+            console.log("All donors:", donors);
+            console.log("User email:", user.email);
+            
+            // First check if we have a donor ID in user metadata (most reliable)
+            let donorProfile = null;
+            if (user.user_metadata?.donorId) {
+              console.log("Trying to match using donorId from metadata:", user.user_metadata.donorId);
+              donorProfile = donors.find(donor => donor.donor_id === user.user_metadata.donorId);
+              
+              if (donorProfile) {
+                console.log("Found donor profile using donorId from metadata");
+              }
+            }
+            
+            // If not found by donor ID, try email matching as fallback
+            if (!donorProfile) {
+              console.log("Trying to match by email...");
+              donorProfile = donors.find(donor => 
+                donor.donor_phno && user.email && 
+                (donor.donor_phno.toLowerCase() === user.email.toLowerCase() ||
+                 donor.donor_phno.includes(user.email.substring(0, 5)))
+              );
+              
+              if (donorProfile) {
+                console.log("Found donor profile by email matching");
+              }
+            }
+            
+            // Log the matched profile
+            if (donorProfile) {
+              console.log("Found matching donor profile:", donorProfile.donor_id, donorProfile.donor_name);
+            } else {
+              console.log("No matching donor profile found for user:", user.email);
+            }
+            
+            setProfileData(donorProfile || null);
+          } else if (userRole === 'receiver') {
+            const receivers = await receiverAPI.getAllReceivers();
+            const receiverProfile = receivers.find(receiver => 
+              receiver.r_phno === user.email || 
+              receiver.receiver_name.toLowerCase() === user.user_metadata?.name?.toLowerCase()
+            );
+            setProfileData(receiverProfile || null);
+          } else if (userRole === 'hospital') {
+            const hospitals = await hospitalAPI.getAllHospitals();
+            const hospitalProfile = hospitals.find(hospital => 
+              hospital.h_name.toLowerCase() === user.user_metadata?.name?.toLowerCase()
+            );
+            setProfileData(hospitalProfile || null);
           }
-        } else if (role === "receiver") {
-          const receivers = await receiverAPI.getAllReceivers();
-          setBloodReceivers(receivers);
-          // You would fetch the specific receiver profile linked to this user
-          if (receivers.length > 0) {
-            setProfileData(receivers[0]);
-          }
-        } else if (role === "hospital") {
-          const hospitals = await hospitalAPI.getAllHospitals();
-          // You would fetch the specific hospital profile linked to this user
-          if (hospitals.length > 0) {
-            setProfileData(hospitals[0]);
-          }
+        } catch (profileError) {
+          console.error("Error fetching profile:", profileError);
         }
         
-        // Fetch blood samples for everyone
-        const samples = await bloodSampleAPI.getAllBloodSamples();
-        setBloodSamples(samples);
+        // Fetch all data for dashboard
+        try {
+          const [allDonors, allReceivers, allSamples] = await Promise.all([
+            donorAPI.getAllDonors(),
+            receiverAPI.getAllReceivers(),
+            bloodSampleAPI.getAllBloodSamples()
+          ]);
+          
+          setBloodDonors(allDonors || []);
+          setBloodReceivers(allReceivers || []);
+          setBloodSamples(allSamples?.map(sample => ({
+            ...sample,
+            blood_group: sample.blood_grp, // Normalize property name for rendering
+            status: sample.status || 'Available'
+          })) || []);
+        } catch (dataError) {
+          console.error("Error fetching dashboard data:", dataError);
+          toast({
+            variant: "destructive",
+            title: "Error loading data",
+            description: "Could not load dashboard data. Please try again later."
+          });
+        }
+
+        // Fetch donor profile if user role includes donor
+        if (userRole === 'donor') {
+          try {
+            // Check if we have a manually set donor ID first
+            const manualDonorId = getManualDonorId();
+            
+            if (manualDonorId) {
+              // Use the manually set donor ID
+              const donorData = await donorAPI.getDonorById(manualDonorId);
+              setDonorProfile(donorData);
+            } else {
+              // Fetch all donors and try to match by email
+              const donors = await donorAPI.getAllDonors();
+              if (donors && donors.length > 0) {
+                // Try to find donor with matching email
+                const currentUserEmail = user?.email?.toLowerCase();
+                const matchedDonor = currentUserEmail ? 
+                  donors.find((donor) => 
+                    donor.donor_email && donor.donor_email.toLowerCase() === currentUserEmail
+                  ) : null;
+                
+                if (matchedDonor) {
+                  setDonorProfile(matchedDonor);
+                } else {
+                  console.log("No donor profile found matching the current user's email");
+                }
+              }
+            }
+          } catch (error) {
+            console.error("Error fetching donor profile:", error);
+          }
+        }
       } catch (error) {
-        console.error("Error fetching user data:", error);
-        toast({
-          variant: "destructive",
-          title: "Error",
-          description: "Failed to load user data. Please try again.",
-        });
+        console.error("Dashboard error:", error);
       } finally {
         setIsLoading(false);
       }
     };
-
-    fetchUserData();
+    
+    fetchData();
   }, [router]);
 
   const handleSignOut = async () => {
@@ -161,6 +241,54 @@ export default function DashboardPage() {
         title: "Error",
         description: "Failed to sign out. Please try again.",
       });
+    }
+  };
+
+  const handleRefreshProfile = async () => {
+    try {
+      setIsRefreshing(true);
+      // Get current user data
+      const user = await getCurrentUser();
+      const userRoles = user?.app_metadata?.roles || [];
+      
+      if (userRoles.includes("donor")) {
+        // Check if we have a manually set donor ID first
+        const manualDonorId = getManualDonorId();
+        
+        if (manualDonorId) {
+          // Use the manually set donor ID
+          const donorData = await donorAPI.getDonorById(manualDonorId);
+          setDonorProfile(donorData);
+          toast({
+            title: "Profile refreshed",
+            description: "Your donor profile has been updated",
+          });
+        } else {
+          toast({
+            variant: "destructive",
+            title: "Profile not found",
+            description: (
+              <div>
+                <p>Your donor profile couldn't be found automatically.</p>
+                <p className="mt-2">
+                  <a href="/debug/donor-list" className="underline font-medium">
+                    Click here to select your profile manually
+                  </a>
+                </p>
+              </div>
+            ),
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Error refreshing profile:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to refresh your profile. Please try again."
+      });
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -200,7 +328,7 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               {profileData ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                   {userRole === "donor" && isDonorProfile(profileData) && (
                     <>
                       <div>
@@ -215,10 +343,6 @@ export default function DashboardPage() {
                         <p className="text-sm text-gray-500">Age</p>
                         <p>{profileData.donor_age}</p>
                       </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Gender</p>
-                        <p>{profileData.donor_sex === "M" ? "Male" : profileData.donor_sex === "F" ? "Female" : "Other"}</p>
-                      </div>
                     </>
                   )}
                   
@@ -229,7 +353,7 @@ export default function DashboardPage() {
                         <p>{profileData.receiver_name}</p>
                       </div>
                       <div>
-                        <p className="text-sm text-gray-500">Blood Group Needed</p>
+                        <p className="text-sm text-gray-500">Blood Group</p>
                         <p className="font-medium text-red-600">{profileData.r_bgrp}</p>
                       </div>
                       <div>
@@ -268,8 +392,33 @@ export default function DashboardPage() {
                 <p className="text-black font-medium">No profile data available.</p>
               )}
             </CardContent>
-            <CardFooter>
-              <Button variant="redOutline" className="w-full">Edit Profile</Button>
+            <CardFooter className="flex flex-col sm:flex-row gap-3">
+              {profileData ? (
+                <Button variant="red" onClick={() => router.push('/donor/appointments')} className="w-full">
+                  Manage Appointments
+                </Button>
+              ) : (
+                <>
+                  <Link href="/donor/register" className="w-full">
+                    <Button variant="red" className="w-full">Register as a Donor</Button>
+                  </Link>
+                  <Button 
+                    variant="outline" 
+                    className="w-full" 
+                    onClick={handleRefreshProfile}
+                    disabled={isRefreshing}
+                  >
+                    {isRefreshing ? "Refreshing..." : "Refresh Profile"}
+                  </Button>
+                </>
+              )}
+              {userRole === "receiver" && (
+                <Link href="/receiver/matched-donors">
+                  <Button variant="red" className="w-full">
+                    Find Matching Donors
+                  </Button>
+                </Link>
+              )}
             </CardFooter>
           </Card>
         </div>
@@ -344,8 +493,19 @@ export default function DashboardPage() {
               <Card className="border border-gray-100 shadow-md overflow-hidden">
                 <div className="h-2 bg-red-600"></div>
                 <CardHeader>
-                  <CardTitle>Blood Receivers</CardTitle>
-                  <CardDescription>List of registered blood receivers</CardDescription>
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <CardTitle>Blood Receivers</CardTitle>
+                      <CardDescription>List of registered blood receivers</CardDescription>
+                    </div>
+                    {userRole === "receiver" && (
+                      <Link href="/receiver/matched-donors">
+                        <Button variant="red" className="ml-4">
+                          View My Matched Donors
+                        </Button>
+                      </Link>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="overflow-x-auto">

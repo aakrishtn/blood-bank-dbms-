@@ -92,10 +92,10 @@ export default function RegisterPage() {
                   <SelectTrigger className="h-11 rounded-md border border-gray-200 text-sm">
                     <SelectValue placeholder="Select role" />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="donor">Blood Donor</SelectItem>
-                    <SelectItem value="receiver">Blood Receiver</SelectItem>
-                    <SelectItem value="hospital">Hospital</SelectItem>
+                  <SelectContent className="bg-gray-100 text-gray-900 border border-gray-300">
+                    <SelectItem value="donor" className="text-gray-900 hover:bg-gray-200">Blood Donor</SelectItem>
+                    <SelectItem value="receiver" className="text-gray-900 hover:bg-gray-200">Blood Receiver</SelectItem>
+                    <SelectItem value="hospital" className="text-gray-900 hover:bg-gray-200">Hospital</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
