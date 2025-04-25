@@ -42,13 +42,30 @@ export default function RegisterPage() {
           description: "Your account has been created successfully. Please login with your details.",
         });
         router.push("/login");
+      } else {
+        throw new Error("Failed to create account");
       }
     } catch (error) {
       console.error("Registration error:", error);
+      let errorMessage = "There was a problem creating your account.";
+      
+      if (error instanceof Error) {
+        // Handle specific Supabase error messages
+        if (error.message.includes("User already registered")) {
+          errorMessage = "This email is already registered. Please try logging in instead.";
+        } else if (error.message.includes("Password should be at least")) {
+          errorMessage = "Password should be at least 6 characters long.";
+        } else if (error.message.includes("Email not confirmed")) {
+          errorMessage = "Please check your email to confirm your account.";
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
       toast({
         variant: "destructive",
         title: "Registration Failed",
-        description: "There was a problem creating your account. Please try again.",
+        description: errorMessage
       });
     } finally {
       setIsLoading(false);

@@ -17,6 +17,7 @@ interface UserData {
   user_metadata?: {
     role?: string;
     donorId?: string;
+    name?: string;
   };
 }
 
@@ -26,6 +27,7 @@ interface DonorProfile {
   donor_bgrp: string;
   donor_age: number;
   donor_sex: string;
+  donor_phno?: string;
   city?: {
     city_name: string;
   };
@@ -37,6 +39,7 @@ interface ReceiverProfile {
   r_bgrp: string;
   r_age: number;
   r_reg_date: string;
+  r_phno?: string;
   city?: {
     city_name: string;
   };
@@ -54,7 +57,7 @@ interface HospitalProfile {
 
 interface BloodSample {
   sample_id: string;
-  blood_group: string;
+  blood_grp: string;
   quantity: number;
   collection_date: string;
   expiry_date: string;
@@ -112,39 +115,85 @@ export default function DashboardPage() {
             console.log("All donors:", donors);
             console.log("User email:", user.email);
             
-            // First check if we have a donor ID in user metadata (most reliable)
+            // First check if we have a manually selected donor ID
             let donorProfile = null;
-            if (user.user_metadata?.donorId) {
+            const manualDonorId = getManualDonorId();
+            
+            if (manualDonorId) {
+              console.log("Trying to match using manual donorId:", manualDonorId);
+              donorProfile = donors.find(donor => donor.donor_id === manualDonorId);
+              if (donorProfile) {
+                console.log("Found donor profile using manual donorId");
+              }
+            }
+            
+            // Then check if we have a donor ID in user metadata
+            if (!donorProfile && user.user_metadata?.donorId) {
               console.log("Trying to match using donorId from metadata:", user.user_metadata.donorId);
               donorProfile = donors.find(donor => donor.donor_id === user.user_metadata.donorId);
-              
               if (donorProfile) {
                 console.log("Found donor profile using donorId from metadata");
               }
             }
             
-            // If not found by donor ID, try email matching as fallback
-            if (!donorProfile) {
-              console.log("Trying to match by email...");
+            // If not found by donor ID, try email matching with multiple strategies
+            if (!donorProfile && user.email) {
+              console.log("Trying to match by email using multiple strategies...");
+              const email = user.email.toLowerCase();
+              
+              // Strategy 1: Exact match
               donorProfile = donors.find(donor => 
-                donor.donor_phno && user.email && 
-                (donor.donor_phno.toLowerCase() === user.email.toLowerCase() ||
-                 donor.donor_phno.includes(user.email.substring(0, 5)))
+                donor.donor_phno && donor.donor_phno.toLowerCase() === email
               );
               
+              // Strategy 2: First 5 chars + last 3 chars match (matching registration logic)
+              if (!donorProfile) {
+                const firstPart = email.substring(0, 5);
+                const lastPart = email.substring(email.length - 3);
+                donorProfile = donors.find(donor => 
+                  donor.donor_phno && 
+                  donor.donor_phno.startsWith(firstPart) && 
+                  donor.donor_phno.endsWith(lastPart)
+                );
+              }
+              
+              // Strategy 3: First 5 chars match (fallback)
+              if (!donorProfile) {
+                const firstPart = email.substring(0, 5);
+                donorProfile = donors.find(donor => 
+                  donor.donor_phno && donor.donor_phno.startsWith(firstPart)
+                );
+              }
+              
               if (donorProfile) {
-                console.log("Found donor profile by email matching");
+                console.log("Found donor profile by email matching strategy");
               }
             }
             
             // Log the matched profile
             if (donorProfile) {
               console.log("Found matching donor profile:", donorProfile.donor_id, donorProfile.donor_name);
+              setProfileData(donorProfile);
             } else {
               console.log("No matching donor profile found for user:", user.email);
+              setProfileData(null);
+              
+              // Show toast with link to manual selection
+              toast({
+                variant: "destructive",
+                title: "Profile not found",
+                description: (
+                  <div>
+                    <p>Your donor profile could not be found automatically.</p>
+                    <p className="mt-2">
+                      <a href="/debug/donor-list" className="underline font-medium">
+                        Click here to select your profile manually
+                      </a>
+                    </p>
+                  </div>
+                )
+              });
             }
-            
-            setProfileData(donorProfile || null);
           } else if (userRole === 'receiver') {
             const receivers = await receiverAPI.getAllReceivers();
             const receiverProfile = receivers.find(receiver => 
@@ -175,8 +224,10 @@ export default function DashboardPage() {
           setBloodReceivers(allReceivers || []);
           setBloodSamples(allSamples?.map(sample => ({
             ...sample,
-            blood_group: sample.blood_grp, // Normalize property name for rendering
-            status: sample.status || 'Available'
+            blood_grp: sample.blood_grp || '',
+            quantity: 1,
+            collection_date: new Date().toISOString().split('T')[0],
+            expiry_date: new Date(new Date().setDate(new Date().getDate() + 42)).toISOString().split('T')[0]
           })) || []);
         } catch (dataError) {
           console.error("Error fetching dashboard data:", dataError);
@@ -197,25 +248,6 @@ export default function DashboardPage() {
               // Use the manually set donor ID
               const donorData = await donorAPI.getDonorById(manualDonorId);
               setProfileData(donorData);
-              toast({
-                title: "Profile refreshed",
-                description: "Your donor profile has been updated",
-              });
-            } else {
-              toast({
-                variant: "destructive",
-                title: "Profile not found",
-                description: (
-                  <div>
-                    <p>Your donor profile couldn&apos;t be found automatically.</p>
-                    <p className="mt-2">
-                      <a href="/debug/donor-list" className="underline font-medium">
-                        Click here to select your profile manually
-                      </a>
-                    </p>
-                  </div>
-                ),
-              });
             }
           } catch (error) {
             console.error("Error fetching donor profile:", error);
@@ -240,7 +272,7 @@ export default function DashboardPage() {
       toast({
         variant: "destructive",
         title: "Error",
-        description: "Failed to sign out. Please try again.",
+        description: "Failed to sign out. Please try again."
       });
     }
   };
@@ -250,9 +282,19 @@ export default function DashboardPage() {
       setIsRefreshing(true);
       // Get current user data
       const user = await getCurrentUser();
-      const userRoles = user?.app_metadata?.roles || [];
       
-      if (userRoles.includes("donor")) {
+      if (!user) {
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "User not found. Please log in again."
+        });
+        return;
+      }
+      
+      const userRole = user.user_metadata?.role || "guest";
+      
+      if (userRole === "donor") {
         // Check if we have a manually set donor ID first
         const manualDonorId = getManualDonorId();
         
@@ -262,23 +304,39 @@ export default function DashboardPage() {
           setProfileData(donorData);
           toast({
             title: "Profile refreshed",
-            description: "Your donor profile has been updated",
+            description: "Your donor profile has been updated"
           });
         } else {
-          toast({
-            variant: "destructive",
-            title: "Profile not found",
-            description: (
-              <div>
-                <p>Your donor profile couldn&apos;t be found automatically.</p>
-                <p className="mt-2">
-                  <a href="/debug/donor-list" className="underline font-medium">
-                    Click here to select your profile manually
-                  </a>
-                </p>
-              </div>
-            ),
-          });
+          // If no manual ID, try to find donor by email matching
+          const donors = await donorAPI.getAllDonors();
+          const foundDonorProfile = donors.find(donor => 
+            donor.donor_phno && user.email && 
+            (donor.donor_phno.toLowerCase() === user.email.toLowerCase() ||
+             donor.donor_phno.includes(user.email.substring(0, 5)))
+          );
+          
+          if (foundDonorProfile) {
+            setProfileData(foundDonorProfile);
+            toast({
+              title: "Profile refreshed",
+              description: "Your donor profile has been updated"
+            });
+          } else {
+            toast({
+              variant: "destructive",
+              title: "Profile not found",
+              description: (
+                <div>
+                  <p>Your donor profile could not be found automatically.</p>
+                  <p className="mt-2">
+                    <a href="/debug/donor-list" className="underline font-medium">
+                      Click here to select your profile manually
+                    </a>
+                  </p>
+                </div>
+              )
+            });
+          }
         }
       }
     } catch (error) {
@@ -564,7 +622,7 @@ export default function DashboardPage() {
                           bloodSamples.map((sample) => (
                             <tr key={sample.sample_id}>
                               <td className="px-6 py-4 whitespace-nowrap">{sample.sample_id}</td>
-                              <td className="px-6 py-4 whitespace-nowrap font-medium text-red-600">{sample.blood_group}</td>
+                              <td className="px-6 py-4 whitespace-nowrap font-medium text-red-600">{sample.blood_grp}</td>
                               <td className="px-6 py-4 whitespace-nowrap">{sample.status}</td>
                               <td className="px-6 py-4 whitespace-nowrap">{sample.doctor?.doc_name}</td>
                             </tr>
@@ -590,4 +648,4 @@ export default function DashboardPage() {
       </main>
     </div>
   );
-} 
+}

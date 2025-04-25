@@ -3,8 +3,27 @@ import { supabase } from './supabase';
 // City API
 export const cityAPI = {
   async getAllCities() {
-    const { data, error } = await supabase.from('city').select('*');
-    if (error) throw error;
+    const { data } = await supabase
+      .from('city')
+      .select('*')
+      .order('city_name');
+    
+    // If no data from database, return static US cities
+    if (!data || data.length === 0) {
+      return [
+        { city_id: 'NYC', city_name: 'New York City' },
+        { city_id: 'LA', city_name: 'Los Angeles' },
+        { city_id: 'CHI', city_name: 'Chicago' },
+        { city_id: 'HOU', city_name: 'Houston' },
+        { city_id: 'PHX', city_name: 'Phoenix' },
+        { city_id: 'PHI', city_name: 'Philadelphia' },
+        { city_id: 'SAT', city_name: 'San Antonio' },
+        { city_id: 'SD', city_name: 'San Diego' },
+        { city_id: 'DAL', city_name: 'Dallas' },
+        { city_id: 'SJ', city_name: 'San Jose' }
+      ];
+    }
+    
     return data;
   },
   

@@ -71,11 +71,17 @@ WITH CHECK (user_id = auth.uid());
 DROP POLICY IF EXISTS "Cities are viewable by everyone" ON city;
 DROP POLICY IF EXISTS "authenticated_users_can_insert_cities" ON city;
 
+-- Enable RLS on city table
+ALTER TABLE city ENABLE ROW LEVEL SECURITY;
+
+-- Allow everyone (including anonymous) to view cities
 CREATE POLICY "Cities are viewable by everyone"
 ON city
 FOR SELECT
+TO PUBLIC
 USING (true);
 
+-- Allow authenticated users to insert cities
 CREATE POLICY "authenticated_users_can_insert_cities"
 ON city
 FOR INSERT

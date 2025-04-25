@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "@/components/ui/use-toast";
 import Link from "next/link";
+import { supabase } from "@/lib/supabase";
 
 interface Donor {
   donor_id: string;
@@ -34,10 +35,33 @@ interface Receiver {
   };
 }
 
+interface MatchedDonor {
+  donor_id: string;
+  donor_name: string;
+  donor_bgrp: string;
+  donor_age: number;
+  donor_sex: string;
+  city: {
+    city_name: string;
+  };
+}
+
+interface BloodCenter {
+  center_id: string;
+  center_name: string;
+  address: string;
+  city_id: string;
+}
+
 export default function MatchedDonorsPage() {
   const [isLoading, setIsLoading] = useState(true);
-  const [matchedDonors, setMatchedDonors] = useState<Donor[]>([]);
+  const [matchedDonors, setMatchedDonors] = useState<MatchedDonor[]>([]);
   const [receiverInfo, setReceiverInfo] = useState<Receiver | null>(null);
+  const [bloodCenters, setBloodCenters] = useState<BloodCenter[]>([]);
+  const [selectedDonor, setSelectedDonor] = useState<string | null>(null);
+  const [selectedCenter, setSelectedCenter] = useState<string | null>(null);
+  const [appointmentDate, setAppointmentDate] = useState<string>("");
+  const [isScheduling, setIsScheduling] = useState(false);
   const router = useRouter();
 
   // Function to check blood type compatibility
@@ -175,7 +199,7 @@ export default function MatchedDonorsPage() {
               })
             );
             
-            setMatchedDonors(donorDetails.filter(Boolean));
+            setMatchedDonors(donorDetails.filter(Boolean) as MatchedDonor[]);
           } else {
             // Fallback: Get all donors and filter on client side if stored procedure fails
             console.log("No matches from stored procedure, using client-side fallback");
@@ -183,7 +207,7 @@ export default function MatchedDonorsPage() {
             const compatibleDonors = allDonors.filter(donor => 
               isCompatibleBloodType(profileToUse.r_bgrp, donor.donor_bgrp)
             );
-            setMatchedDonors(compatibleDonors);
+            setMatchedDonors(compatibleDonors as MatchedDonor[]);
           }
         } catch (error) {
           console.error("Error with primary matching method, using fallback:", error);
@@ -192,13 +216,21 @@ export default function MatchedDonorsPage() {
           const compatibleDonors = allDonors.filter(donor => 
             isCompatibleBloodType(profileToUse.r_bgrp, donor.donor_bgrp)
           );
-          setMatchedDonors(compatibleDonors);
+          setMatchedDonors(compatibleDonors as MatchedDonor[]);
         }
         
         // Clear localStorage role after we've used it once, but keep receiver ID and blood type
         if (storedRole === 'receiver') {
           window.localStorage.removeItem('userRole');
         }
+
+        // Get blood centers in the same city
+        const { data: centers } = await supabase
+          .from('blood_center')
+          .select('*')
+          .eq('city_id', profileToUse.city?.city_name);
+
+        setBloodCenters(centers || []);
       } catch (error) {
         console.error("Error fetching matched donors:", error);
         toast({
@@ -214,12 +246,67 @@ export default function MatchedDonorsPage() {
     fetchData();
   }, [router]);
 
-  const handleContact = (donorId: string) => {
-    // In a real app, this would initiate contact with the donor
-    toast({
-      title: "Contact Request Sent",
-      description: `Request sent to donor ID: ${donorId}. They will be notified of your blood request.`
-    });
+  const handleScheduleAppointment = async () => {
+    if (!selectedDonor || !selectedCenter || !appointmentDate) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Please select a donor, blood center, and appointment date"
+      });
+      return;
+    }
+
+    setIsScheduling(true);
+
+    try {
+      const user = await getCurrentUser();
+      
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+
+      const { data: userProfile } = await supabase
+        .from('user_profiles')
+        .select('profile_id')
+        .eq('user_id', user.id)
+        .single();
+
+      if (!userProfile) {
+        throw new Error('User profile not found');
+      }
+
+      const { error } = await supabase
+        .from('appointments')
+        .insert({
+          donor_id: selectedDonor,
+          receiver_id: userProfile.profile_id,
+          blood_center_id: selectedCenter,
+          appointment_date: new Date(appointmentDate).toISOString(),
+          status: 'pending'
+        });
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Appointment scheduled successfully"
+      });
+
+      // Reset form
+      setSelectedDonor(null);
+      setSelectedCenter(null);
+      setAppointmentDate("");
+    } catch (error) {
+      console.error('Error scheduling appointment:', error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to schedule appointment"
+      });
+    } finally {
+      setIsScheduling(false);
+    }
   };
 
   if (isLoading) {
@@ -287,13 +374,32 @@ export default function MatchedDonorsPage() {
                           <td className="px-6 py-4 whitespace-nowrap">{donor.donor_sex || 'Not specified'}</td>
                           <td className="px-6 py-4 whitespace-nowrap">{donor.city?.city_name || 'Not specified'}</td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            <Button 
-                              variant="red" 
-                              size="sm" 
-                              onClick={() => handleContact(donor.donor_id)}
-                            >
-                              Contact
-                            </Button>
+                            {selectedDonor === donor.donor_id ? (
+                              <div className="flex gap-3 w-full">
+                                <Button
+                                  variant="red"
+                                  className="flex-1"
+                                  onClick={handleScheduleAppointment}
+                                  disabled={isScheduling || !selectedCenter || !appointmentDate}
+                                >
+                                  {isScheduling ? "Scheduling..." : "Schedule Appointment"}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  onClick={() => setSelectedDonor(null)}
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            ) : (
+                              <Button
+                                variant="red"
+                                size="sm"
+                                onClick={() => setSelectedDonor(donor.donor_id)}
+                              >
+                                Schedule Appointment
+                              </Button>
+                            )}
                           </td>
                         </tr>
                       ))}

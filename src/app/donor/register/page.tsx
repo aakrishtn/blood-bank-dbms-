@@ -33,28 +33,47 @@ export default function DonorRegistrationPage() {
     // Fetch the list of cities
     const fetchCities = async () => {
       try {
+        console.log("Fetching cities...");
         const citiesData = await cityAPI.getAllCities();
-        setCities(citiesData);
+        console.log("Cities data received:", citiesData);
         
-        // If no cities found, try to seed the database
-        if (!citiesData || citiesData.length === 0) {
-          try {
-            console.log("No cities found. Attempting to seed the database...");
-            const response = await fetch('/api/seed/cities');
-            if (response.ok) {
-              // Fetch cities again after seeding
-              const newCitiesData = await cityAPI.getAllCities();
-              setCities(newCitiesData);
-              console.log("Cities seeded successfully!");
-            } else {
-              console.error("Failed to seed cities:", await response.text());
-            }
-          } catch (seedError) {
-            console.error("Error seeding cities:", seedError);
+        if (citiesData && citiesData.length > 0) {
+          setCities(citiesData);
+        } else {
+          // If no cities found, try to seed the database
+          console.log("No cities found. Attempting to seed the database...");
+          const response = await fetch('/api/seed/cities');
+          const data = await response.json();
+          
+          if (data.error) {
+            console.error("Error seeding cities:", data.error);
+            toast({
+              variant: "destructive",
+              title: "Error",
+              description: "Failed to load cities. Please try again later."
+            });
+            return;
+          }
+          
+          if (data.cities && data.cities.length > 0) {
+            console.log("Cities seeded successfully:", data.cities);
+            setCities(data.cities);
+          } else {
+            console.error("No cities were seeded");
+            toast({
+              variant: "destructive",
+              title: "Error",
+              description: "Failed to load cities. Please try again later."
+            });
           }
         }
       } catch (error) {
         console.error("Error fetching cities:", error);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to load cities. Please try again later."
+        });
       }
     };
 
@@ -80,8 +99,12 @@ export default function DonorRegistrationPage() {
       }
     };
 
-    checkAuth();
-    fetchCities();
+    const init = async () => {
+      await fetchCities();
+      await checkAuth();
+    };
+
+    init();
   }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -161,25 +184,119 @@ export default function DonorRegistrationPage() {
       
       // Link user to donor profile
       try {
-        const { error: linkError } = await supabase
+        console.log("Attempting to link user profile...");
+        
+        // First check if user profile already exists
+        const { data: existingProfile, error: checkError } = await supabase
           .from('user_profiles')
-          .insert({
-            user_id: user.id,
-            profile_id: donorId,
-            profile_type: 'donor'
-          });
+          .select('*')
+          .eq('user_id', user.id)
+          .single();
           
-        if (linkError) {
-          console.error("Error linking user to donor profile:", linkError);
+        if (checkError) {
+          // Check for empty error object
+          if (Object.keys(checkError).length === 0) {
+            console.error("Error checking existing profile: Empty error object. This might be a 404 Not Found.");
+          } else if (checkError.code === 'PGRST116') { 
+            // PGRST116 means no rows returned - this is expected
+            console.log("No existing profile found, will create new one");
+          } else {
+            console.error("Error checking existing profile:", checkError.message || checkError.code || JSON.stringify(checkError));
+          }
+        }
+        
+        if (existingProfile) {
+          console.log("User already has a profile, updating it:", existingProfile);
+          // Update existing profile
+          const { error: updateError } = await supabase
+            .from('user_profiles')
+            .update({
+              profile_id: donorId,
+              profile_type: 'donor'
+            })
+            .eq('user_id', user.id);
+            
+          if (updateError) {
+            console.error("Error updating user profile:", updateError.message || updateError.code || JSON.stringify(updateError));
+            throw new Error(`Failed to update profile: ${updateError.message || "Unknown error"}`);
+          }
+        } else {
+          // Create the user in the users table first to avoid foreign key constraint issues
+          console.log("Creating user entry in users table to ensure it exists");
+          
+          // First check if the user already exists in the users table
+          const { data: existingUser, error: userCheckError } = await supabase
+            .from('users')
+            .select('id')
+            .eq('id', user.id)
+            .single();
+            
+          if (userCheckError && userCheckError.code !== 'PGRST116') {
+            console.log("Error checking user existence:", userCheckError.message || userCheckError.code);
+          }
+          
+          if (!existingUser) {
+            console.log("User doesn't exist in users table, creating it now");
+            // Create the user in the users table first (might be needed if using only Supabase Auth)
+            const { error: userInsertError } = await supabase
+              .from('users')
+              .insert({
+                id: user.id,
+                email: user.email || '',
+                password_hash: '', // We don't have access to password hash
+                user_role: 'donor'
+              });
+              
+            if (userInsertError) {
+              console.error("Error creating user in users table:", 
+                userInsertError.message || userInsertError.code || JSON.stringify(userInsertError));
+                
+              if (userInsertError.code === '23505') { // Unique violation - user already exists
+                console.log("User already exists, continuing with profile creation");
+              } else {
+                throw new Error(`Failed to create user: ${userInsertError.message || "Unknown error"}`);
+              }
+            } else {
+              console.log("Successfully created user in users table");
+            }
+          } else {
+            console.log("User already exists in the users table");
+          }
+          
+          // Now create the profile with confidence that the user exists
+          console.log("Creating user profile");
+          const { error: profileError } = await supabase
+            .from('user_profiles')
+            .insert({
+              user_id: user.id,
+              profile_id: donorId,
+              profile_type: 'donor'
+            });
+            
+          if (profileError) {
+            console.error("Error creating user profile:", 
+              profileError.message || profileError.code || JSON.stringify(profileError));
+              
+            throw new Error(`Failed to create profile: ${profileError.message || "Unknown error"}`);
+          }
+          
+          console.log("Successfully created user profile");
         }
       } catch (linkErr) {
-        console.error("Error in profile linking:", linkErr);
-        // Continue even if linking fails
+        console.error("Error in profile linking:", linkErr instanceof Error ? linkErr.message : JSON.stringify(linkErr));
+        toast({
+          variant: "destructive",
+          title: "Profile Linking Error",
+          description: linkErr instanceof Error 
+            ? `Error: ${linkErr.message}` 
+            : "Failed to link your profile. Please contact support."
+        });
+        // Don't return here, continue with role update
       }
 
       // Update the user metadata to set role as donor
       try {
-        // Call the API to update user role in Supabase
+        console.log("Updating user role...");
         const response = await fetch('/api/users/update-role', {
           method: 'POST',
           headers: {
@@ -198,10 +315,20 @@ export default function DonorRegistrationPage() {
         });
         
         if (!response.ok) {
-          console.error("Failed to update user role");
+          const errorData = await response.text();
+          console.error("Failed to update user role:", errorData);
+          throw new Error("Failed to update user role");
         }
+        
+        console.log("Successfully updated user role");
       } catch (metadataError) {
         console.error("Error updating user metadata:", metadataError);
+        toast({
+          variant: "destructive",
+          title: "Role Update Error",
+          description: "Failed to update your user role. Please contact support."
+        });
+        // Continue to show success message as donor record was created
       }
 
       toast({
@@ -328,11 +455,19 @@ export default function DonorRegistrationPage() {
                       <SelectValue placeholder="Select your city" />
                     </SelectTrigger>
                     <SelectContent className="max-h-60 overflow-y-auto z-50 bg-gray-100 text-gray-900 border border-gray-300">
-                      {cities.map((city) => (
-                        <SelectItem key={city.city_id} value={city.city_id} className="text-gray-900 hover:bg-gray-200">
-                          {city.city_name}
-                        </SelectItem>
-                      ))}
+                      {cities && cities.length > 0 ? (
+                        cities.map((city) => (
+                          <SelectItem 
+                            key={city.city_id} 
+                            value={city.city_id} 
+                            className="text-gray-900 hover:bg-gray-200"
+                          >
+                            {city.city_name}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="no-cities" disabled>No cities available</SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
