@@ -560,4 +560,110 @@ export const bloodCenterAPI = {
       return data;
     }
   }
+};
+
+// Blood Inventory API
+export const bloodInventoryAPI = {
+  async getAllInventory() {
+    const { data, error } = await supabase
+      .from('blood_inventory')
+      .select(`
+        *,
+        hospital:hospital_id(h_id, h_name, city_id, city:city_id(city_name)),
+        center:center_id(center_id, center_name, city_id, city:city_id(city_name)),
+        doctor:doc_id(doc_id, doc_name)
+      `);
+    if (error) throw error;
+    return data || [];
+  },
+  
+  async getInventoryByBloodGroup(bloodGroup: string) {
+    const { data, error } = await supabase
+      .from('blood_inventory')
+      .select(`
+        *,
+        hospital:hospital_id(h_id, h_name, city_id, city:city_id(city_name)),
+        center:center_id(center_id, center_name, city_id, city:city_id(city_name)),
+        doctor:doc_id(doc_id, doc_name)
+      `)
+      .eq('blood_grp', bloodGroup);
+    if (error) throw error;
+    return data || [];
+  },
+  
+  async getInventoryByHospital(hospitalId: string) {
+    const { data, error } = await supabase
+      .from('blood_inventory')
+      .select(`
+        *,
+        hospital:hospital_id(h_id, h_name, city_id, city:city_id(city_name)),
+        doctor:doc_id(doc_id, doc_name)
+      `)
+      .eq('hospital_id', hospitalId);
+    if (error) throw error;
+    return data || [];
+  },
+  
+  async getInventoryByCenter(centerId: string) {
+    const { data, error } = await supabase
+      .from('blood_inventory')
+      .select(`
+        *,
+        center:center_id(center_id, center_name, city_id, city:city_id(city_name)),
+        doctor:doc_id(doc_id, doc_name)
+      `)
+      .eq('center_id', centerId);
+    if (error) throw error;
+    return data || [];
+  },
+  
+  async getCompatibleBloodInventory(bloodGroup: string) {
+    const { data, error } = await supabase
+      .rpc('get_hospital_blood_inventory', { blood_group_param: bloodGroup });
+    if (error) throw error;
+    return data || [];
+  },
+  
+  async addInventoryItem(item: {
+    blood_grp: string;
+    quantity: number;
+    status: string;
+    hospital_id?: string;
+    center_id?: string;
+    doc_id?: string;
+  }) {
+    const { data, error } = await supabase.from('blood_inventory').insert(item);
+    if (error) throw error;
+    return data;
+  },
+  
+  async updateInventoryItem(inventoryId: string, item: Partial<{
+    blood_grp: string;
+    quantity: number;
+    status: string;
+    hospital_id: string;
+    center_id: string;
+    doc_id: string;
+  }>) {
+    const { data, error } = await supabase
+      .from('blood_inventory')
+      .update(item)
+      .eq('inventory_id', inventoryId);
+    if (error) throw error;
+    return data;
+  },
+  
+  async updateInventoryQuantity(inventoryId: string, quantity: number) {
+    const { data, error } = await supabase
+      .from('blood_inventory')
+      .update({ quantity })
+      .eq('inventory_id', inventoryId);
+    if (error) throw error;
+    return data;
+  },
+  
+  async deleteInventoryItem(inventoryId: string) {
+    const { error } = await supabase.from('blood_inventory').delete().eq('inventory_id', inventoryId);
+    if (error) throw error;
+  }
 }; 

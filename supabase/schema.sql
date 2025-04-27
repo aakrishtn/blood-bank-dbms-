@@ -5,6 +5,7 @@ DROP TABLE IF EXISTS user_profiles CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 DROP TABLE IF EXISTS receiver CASCADE;
 DROP TABLE IF EXISTS donor CASCADE;
+DROP TABLE IF EXISTS blood_inventory CASCADE;
 DROP TABLE IF EXISTS blood_sample CASCADE;
 DROP TABLE IF EXISTS hospital_doctor CASCADE;
 DROP TABLE IF EXISTS hospital CASCADE;
@@ -23,6 +24,19 @@ CREATE TABLE IF NOT EXISTS city (
     city_id VARCHAR PRIMARY KEY,
     city_name VARCHAR NOT NULL
 );
+
+-- Insert US cities immediately after creating the table
+INSERT INTO city (city_id, city_name) VALUES
+  ('NYC', 'New York City'),
+  ('LA', 'Los Angeles'),
+  ('CHI', 'Chicago'),
+  ('HOU', 'Houston'),
+  ('PHX', 'Phoenix'),
+  ('PHI', 'Philadelphia'),
+  ('SAT', 'San Antonio'),
+  ('SD', 'San Diego'),
+  ('DAL', 'Dallas'),
+  ('SJ', 'San Jose');
 
 CREATE TABLE IF NOT EXISTS manager (
     m_id VARCHAR PRIMARY KEY,
@@ -43,6 +57,20 @@ CREATE TABLE IF NOT EXISTS doctor (
     specialization VARCHAR(100)
 );
 
+-- Insert doctors immediately after creating the table
+INSERT INTO doctor (doc_id, doc_name, doc_phno, specialization)
+VALUES
+  ('DOC001', 'Dr. James Smith', '555-0101', 'Hematology'),
+  ('DOC002', 'Dr. Maria Rodriguez', '555-0102', 'Internal Medicine'),
+  ('DOC003', 'Dr. David Johnson', '555-0103', 'Transfusion Medicine'),
+  ('DOC004', 'Dr. Sarah Chen', '555-0104', 'Clinical Pathology'),
+  ('DOC005', 'Dr. Robert Kim', '555-0105', 'Hematology')
+ON CONFLICT (doc_id) 
+DO UPDATE SET 
+  doc_name = EXCLUDED.doc_name,
+  doc_phno = EXCLUDED.doc_phno,
+  specialization = EXCLUDED.specialization;
+
 -- Create blood center table
 CREATE TABLE IF NOT EXISTS blood_center (
     center_id VARCHAR PRIMARY KEY,
@@ -57,6 +85,14 @@ CREATE TABLE IF NOT EXISTS blood_center (
     last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Insert blood centers immediately after creating the table
+INSERT INTO blood_center (center_id, center_name, address, city_id)
+VALUES 
+  ('BC001', 'Central Blood Bank', '123 Main St', 'NYC'),
+  ('BC002', 'LifeSavers Blood Center', '456 Oak Ave', 'LA'),
+  ('BC003', 'Community Blood Services', '789 Pine Rd', 'CHI')
+ON CONFLICT DO NOTHING;
+
 -- Create hospital table
 CREATE TABLE IF NOT EXISTS hospital (
     h_id VARCHAR PRIMARY KEY,
@@ -68,6 +104,20 @@ CREATE TABLE IF NOT EXISTS hospital (
     h_address VARCHAR(255)
 );
 
+-- Insert hospitals immediately after creating the table
+INSERT INTO hospital (h_id, h_name, city_id, h_address)
+VALUES
+  ('HNYC001', 'New York General Hospital', 'NYC', '123 Main St, New York'),
+  ('HNYC002', 'New York Community Medical Center', 'NYC', '456 Park Ave, New York'),
+  ('HLA001', 'Los Angeles General Hospital', 'LA', '123 Broadway, Los Angeles'),
+  ('HLA002', 'LA Community Medical Center', 'LA', '456 Hollywood Blvd, Los Angeles'),
+  ('HCHI001', 'Chicago General Hospital', 'CHI', '123 State St, Chicago')
+ON CONFLICT (h_id) 
+DO UPDATE SET
+  h_name = EXCLUDED.h_name,
+  city_id = EXCLUDED.city_id,
+  h_address = EXCLUDED.h_address;
+
 -- Create hospital_doctor relationship table
 CREATE TABLE IF NOT EXISTS hospital_doctor (
     hospital_id VARCHAR REFERENCES hospital(h_id),
@@ -75,14 +125,55 @@ CREATE TABLE IF NOT EXISTS hospital_doctor (
     PRIMARY KEY (hospital_id, doctor_id)
 );
 
+-- Insert hospital-doctor relationships
+INSERT INTO hospital_doctor (hospital_id, doctor_id)
+VALUES
+  ('HNYC001', 'DOC001'),
+  ('HNYC001', 'DOC002'),
+  ('HNYC002', 'DOC003'),
+  ('HLA001', 'DOC004'),
+  ('HLA002', 'DOC005'),
+  ('HCHI001', 'DOC001')
+ON CONFLICT (hospital_id, doctor_id) DO NOTHING;
+
 -- Create blood sample table
 CREATE TABLE IF NOT EXISTS blood_sample (
     sample_id VARCHAR PRIMARY KEY,
     blood_grp VARCHAR NOT NULL,
     status VARCHAR NOT NULL,
+    collection_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    expiry_date TIMESTAMP WITH TIME ZONE,
     m_id VARCHAR REFERENCES manager(m_id),
     doc_id VARCHAR REFERENCES doctor(doc_id)
 );
+
+-- Create blood inventory table to track blood samples at hospitals and blood centers
+CREATE TABLE IF NOT EXISTS blood_inventory (
+    inventory_id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    blood_grp VARCHAR NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    status VARCHAR NOT NULL DEFAULT 'available',
+    hospital_id VARCHAR REFERENCES hospital(h_id),
+    center_id VARCHAR REFERENCES blood_center(center_id),
+    doc_id VARCHAR REFERENCES doctor(doc_id),
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT either_hospital_or_center CHECK (
+        (hospital_id IS NOT NULL AND center_id IS NULL) OR
+        (hospital_id IS NULL AND center_id IS NOT NULL)
+    )
+);
+
+-- Insert blood inventory data
+INSERT INTO blood_inventory (blood_grp, quantity, status, hospital_id, doc_id)
+VALUES 
+  ('A+', 10, 'available', 'HNYC001', 'DOC001'),
+  ('A-', 5, 'available', 'HNYC001', 'DOC002'),
+  ('B+', 8, 'available', 'HNYC002', 'DOC003'),
+  ('B-', 3, 'available', 'HLA001', 'DOC004'),
+  ('AB+', 2, 'available', 'HLA002', 'DOC005'),
+  ('O+', 15, 'available', 'HCHI001', 'DOC001'),
+  ('O-', 7, 'available', 'HNYC001', 'DOC001')
+ON CONFLICT DO NOTHING;
 
 -- Create donor table
 CREATE TABLE IF NOT EXISTS donor (
@@ -175,15 +266,21 @@ CREATE INDEX idx_donor_donor_id ON donor(donor_id);
 CREATE INDEX idx_receiver_phone ON receiver(r_phno);
 CREATE INDEX idx_donor_hospital ON donor(hospital_id);
 CREATE INDEX idx_donor_doctor ON donor(doctor_id);
+CREATE INDEX idx_blood_inventory_grp ON blood_inventory(blood_grp);
+CREATE INDEX idx_blood_inventory_hospital ON blood_inventory(hospital_id);
+CREATE INDEX idx_blood_inventory_center ON blood_inventory(center_id);
+CREATE INDEX idx_blood_inventory_status ON blood_inventory(status);
 
 -- Drop existing function and triggers
 DROP TRIGGER IF EXISTS check_blood_group_sample ON blood_sample;
 DROP TRIGGER IF EXISTS check_blood_group_donor ON donor;
 DROP TRIGGER IF EXISTS check_blood_group_receiver ON receiver;
+DROP TRIGGER IF EXISTS check_blood_group_inventory ON blood_inventory;
 DROP FUNCTION IF EXISTS validate_blood_group();
 
 -- Also drop the match_donors_with_receivers function to avoid type conflict
 DROP FUNCTION IF EXISTS match_donors_with_receivers(VARCHAR);
+DROP FUNCTION IF EXISTS get_hospital_blood_inventory(VARCHAR);
 DROP FUNCTION IF EXISTS update_updated_at_column();
 DROP FUNCTION IF EXISTS notify_appointment_status_change();
 DROP FUNCTION IF EXISTS find_centers_by_location(FLOAT, FLOAT, FLOAT);
@@ -207,6 +304,10 @@ BEGIN
         IF NEW.r_bgrp NOT IN ('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-') THEN
             RAISE EXCEPTION 'Invalid blood group: %', NEW.r_bgrp;
         END IF;
+    ELSIF TG_TABLE_NAME = 'blood_inventory' THEN
+        IF NEW.blood_grp NOT IN ('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-') THEN
+            RAISE EXCEPTION 'Invalid blood group: %', NEW.blood_grp;
+        END IF;
     END IF;
     RETURN NEW;
 END;
@@ -228,7 +329,12 @@ CREATE TRIGGER check_blood_group_receiver
     FOR EACH ROW
     EXECUTE FUNCTION validate_blood_group();
 
--- Function to match donors with receivers
+CREATE TRIGGER check_blood_group_inventory
+    BEFORE INSERT OR UPDATE ON blood_inventory
+    FOR EACH ROW
+    EXECUTE FUNCTION validate_blood_group();
+
+-- Function to match donors with receivers (keeping for compatibility)
 CREATE OR REPLACE FUNCTION match_donors_with_receivers(receiver_id_param VARCHAR)
 RETURNS TABLE (donor_id VARCHAR, donor_name VARCHAR, donor_bgrp VARCHAR) AS $$
 DECLARE
@@ -251,7 +357,56 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to update timestamps
+-- Function to get hospital blood inventory with blood group compatibility
+CREATE OR REPLACE FUNCTION get_hospital_blood_inventory(blood_group_param VARCHAR)
+RETURNS TABLE (
+    inventory_id UUID,
+    hospital_id VARCHAR,
+    hospital_name VARCHAR,
+    city_id VARCHAR,
+    city_name VARCHAR,
+    blood_group VARCHAR,
+    quantity INTEGER,
+    doctor_id VARCHAR,
+    doctor_name VARCHAR
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        bi.inventory_id,
+        h.h_id,
+        h.h_name,
+        c.city_id,
+        c.city_name,
+        bi.blood_grp,
+        bi.quantity,
+        d.doc_id,
+        d.doc_name
+    FROM 
+        blood_inventory bi
+    JOIN 
+        hospital h ON bi.hospital_id = h.h_id
+    LEFT JOIN 
+        city c ON h.city_id = c.city_id
+    LEFT JOIN 
+        doctor d ON bi.doc_id = d.doc_id
+    WHERE 
+        bi.status = 'available' AND
+        bi.quantity > 0 AND
+        (
+            (blood_group_param = 'A+' AND bi.blood_grp IN ('A+', 'A-', 'O+', 'O-')) OR
+            (blood_group_param = 'A-' AND bi.blood_grp IN ('A-', 'O-')) OR
+            (blood_group_param = 'B+' AND bi.blood_grp IN ('B+', 'B-', 'O+', 'O-')) OR
+            (blood_group_param = 'B-' AND bi.blood_grp IN ('B-', 'O-')) OR
+            (blood_group_param = 'AB+' AND bi.blood_grp IN ('A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-')) OR
+            (blood_group_param = 'AB-' AND bi.blood_grp IN ('A-', 'B-', 'AB-', 'O-')) OR
+            (blood_group_param = 'O+' AND bi.blood_grp IN ('O+', 'O-')) OR
+            (blood_group_param = 'O-' AND bi.blood_grp = 'O-')
+        );
+END;
+$$ LANGUAGE plpgsql;
+
+-- Update timestamp function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -260,30 +415,31 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Create trigger for updating timestamp
 CREATE TRIGGER update_appointments_updated_at
     BEFORE UPDATE ON appointments
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- Function to handle appointment notifications
+-- Notification function
 CREATE OR REPLACE FUNCTION notify_appointment_status_change()
 RETURNS TRIGGER AS $$
 BEGIN
     INSERT INTO appointment_notifications (
-        appointment_id,
-        notification_type,
-        message,
-        created_at
+        appointment_id, 
+        notification_type, 
+        message
     ) VALUES (
-        NEW.appointment_id,
-        'status_change',
-        format('Appointment status changed from %s to %s', OLD.status, NEW.status),
-        NOW()
+        NEW.appointment_id, 
+        'status_change', 
+        'Appointment status changed from ' || OLD.status || ' to ' || NEW.status
     );
+    
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
+-- Create trigger for notifications
 CREATE TRIGGER appointment_status_change_notification
     AFTER UPDATE OF status ON appointments
     FOR EACH ROW
@@ -291,113 +447,102 @@ CREATE TRIGGER appointment_status_change_notification
     EXECUTE FUNCTION notify_appointment_status_change();
 
 -- Function to find blood centers by location
-CREATE OR REPLACE FUNCTION find_centers_by_location(
-    lat_param FLOAT,
-    lng_param FLOAT,
-    radius_km FLOAT
-)
+CREATE OR REPLACE FUNCTION find_centers_by_location(lat FLOAT, lng FLOAT, radius_km FLOAT)
 RETURNS TABLE (
     center_id VARCHAR,
     center_name VARCHAR,
     address VARCHAR,
-    city_id VARCHAR,
-    coordinates POINT,
+    city_name VARCHAR,
+    distance FLOAT,
     phone VARCHAR,
-    operating_hours VARCHAR,
-    available_services VARCHAR[],
-    api_source VARCHAR,
-    last_updated TIMESTAMP WITH TIME ZONE,
-    distance_km FLOAT
+    operating_hours VARCHAR
 ) AS $$
 BEGIN
     RETURN QUERY
     SELECT 
-        bc.*,
+        bc.center_id,
+        bc.center_name,
+        bc.address,
+        c.city_name,
         ST_Distance(
             bc.coordinates::geography,
-            ST_SetSRID(ST_MakePoint(lng_param, lat_param), 4326)::geography
-        ) / 1000 AS distance_km
-    FROM blood_center bc
-    WHERE ST_DWithin(
-        bc.coordinates::geography,
-        ST_SetSRID(ST_MakePoint(lng_param, lat_param), 4326)::geography,
-        radius_km * 1000
-    )
-    ORDER BY distance_km;
+            ST_SetSRID(ST_MakePoint(lng, lat), 4326)::geography
+        ) / 1000 AS distance_km,
+        bc.phone,
+        bc.operating_hours
+    FROM 
+        blood_center bc
+    LEFT JOIN 
+        city c ON bc.city_id = c.city_id
+    WHERE 
+        ST_DWithin(
+            bc.coordinates::geography,
+            ST_SetSRID(ST_MakePoint(lng, lat), 4326)::geography,
+            radius_km * 1000 -- Convert km to meters
+        )
+    ORDER BY 
+        distance_km ASC;
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to get available appointment slots
-CREATE OR REPLACE FUNCTION get_available_slots(
-    p_center_id VARCHAR,
-    p_date DATE
-)
+-- Function to get available appointment slots for a center
+CREATE OR REPLACE FUNCTION get_available_slots(center_id_param VARCHAR, date_param DATE)
 RETURNS TABLE (
-    time_slot TIME
+    available_slot TIMESTAMP
 ) AS $$
+DECLARE
+    opening_time TIME := '08:00:00';
+    closing_time TIME := '18:00:00';
+    slot_interval INTERVAL := '30 minutes';
+    current_slot TIMESTAMP;
+    day_end TIMESTAMP;
 BEGIN
-    RETURN QUERY
-    WITH RECURSIVE
-    hours AS (
-        SELECT '09:00'::TIME AS slot
-        UNION ALL
-        SELECT (slot + INTERVAL '1 hour')::TIME
-        FROM hours
-        WHERE slot < '17:00'::TIME
-    ),
-    booked_slots AS (
-        SELECT DISTINCT DATE_TRUNC('hour', donation_date)::TIME as booked_time
-        FROM appointments
-        WHERE center_id = p_center_id
-        AND DATE(donation_date) = p_date
-        AND status IN ('pending', 'confirmed')
-    )
-    SELECT h.slot
-    FROM hours h
-    WHERE h.slot NOT IN (SELECT booked_time FROM booked_slots)
-    ORDER BY h.slot;
+    -- Set the start and end times for the day
+    current_slot := date_param + opening_time;
+    day_end := date_param + closing_time;
+    
+    -- Loop through each time slot
+    WHILE current_slot < day_end LOOP
+        -- If the slot isn't already booked, return it
+        IF NOT EXISTS (
+            SELECT 1 FROM appointments
+            WHERE center_id = center_id_param
+            AND donation_date = current_slot
+            AND status IN ('pending', 'confirmed')
+        ) THEN
+            available_slot := current_slot;
+            RETURN NEXT;
+        END IF;
+        
+        -- Move to next slot
+        current_slot := current_slot + slot_interval;
+    END LOOP;
+    
+    RETURN;
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to check donor eligibility
+-- Function to check if a donor is eligible to donate
 CREATE OR REPLACE FUNCTION is_donor_eligible(p_donor_id VARCHAR)
 RETURNS BOOLEAN AS $$
 DECLARE
-    last_donation_date DATE;
+    last_donation_date TIMESTAMP;
+    min_interval INTERVAL := '56 days'; -- Standard minimum interval between whole blood donations
 BEGIN
-    SELECT DATE(donation_date)
+    -- Find the most recent completed donation
+    SELECT MAX(donation_date)
     INTO last_donation_date
     FROM appointments
     WHERE donor_id = p_donor_id
-    AND status = 'completed'
-    ORDER BY donation_date DESC
-    LIMIT 1;
-
+    AND status = 'completed';
+    
+    -- If no previous donation or enough time has passed, donor is eligible
     RETURN (
-        last_donation_date IS NULL OR 
-        last_donation_date < CURRENT_DATE - INTERVAL '3 months'
+        last_donation_date IS NULL OR
+        (CURRENT_TIMESTAMP - last_donation_date) >= min_interval
     );
 END;
 $$ LANGUAGE plpgsql;
-
--- First, disable RLS
-ALTER TABLE city DISABLE ROW LEVEL SECURITY;
-
--- Delete existing cities
-DELETE FROM city;
-
--- Insert US cities
-INSERT INTO city (city_id, city_name) VALUES
-  ('NYC', 'New York City'),
-  ('LA', 'Los Angeles'),
-  ('CHI', 'Chicago'),
-  ('HOU', 'Houston'),
-  ('PHX', 'Phoenix'),
-  ('PHI', 'Philadelphia'),
-  ('SAT', 'San Antonio'),
-  ('SD', 'San Diego'),
-  ('DAL', 'Dallas'),
-  ('SJ', 'San Jose');
 
 -- Enable RLS and set policies
 ALTER TABLE city ENABLE ROW LEVEL SECURITY;
@@ -523,45 +668,6 @@ ON hospital_doctor
 FOR SELECT
 TO PUBLIC
 USING (true);
-
--- Add sample doctors with specialization
-INSERT INTO doctor (doc_id, doc_name, doc_phno, specialization)
-VALUES
-  ('DOC001', 'Dr. James Smith', '555-0101', 'Hematology'),
-  ('DOC002', 'Dr. Maria Rodriguez', '555-0102', 'Internal Medicine'),
-  ('DOC003', 'Dr. David Johnson', '555-0103', 'Transfusion Medicine'),
-  ('DOC004', 'Dr. Sarah Chen', '555-0104', 'Clinical Pathology'),
-  ('DOC005', 'Dr. Robert Kim', '555-0105', 'Hematology')
-ON CONFLICT (doc_id) 
-DO UPDATE SET 
-  doc_name = EXCLUDED.doc_name,
-  doc_phno = EXCLUDED.doc_phno,
-  specialization = EXCLUDED.specialization;
-
--- Add sample hospitals with addresses
-INSERT INTO hospital (h_id, h_name, city_id, h_address)
-VALUES
-  ('HNYC001', 'New York General Hospital', 'NYC', '123 Main St, New York'),
-  ('HNYC002', 'New York Community Medical Center', 'NYC', '456 Park Ave, New York'),
-  ('HLA001', 'Los Angeles General Hospital', 'LA', '123 Broadway, Los Angeles'),
-  ('HLA002', 'LA Community Medical Center', 'LA', '456 Hollywood Blvd, Los Angeles'),
-  ('HCHI001', 'Chicago General Hospital', 'CHI', '123 State St, Chicago')
-ON CONFLICT (h_id) 
-DO UPDATE SET
-  h_name = EXCLUDED.h_name,
-  city_id = EXCLUDED.city_id,
-  h_address = EXCLUDED.h_address;
-
--- Add hospital-doctor relationships AFTER hospitals exist
-INSERT INTO hospital_doctor (hospital_id, doctor_id)
-VALUES
-  ('HNYC001', 'DOC001'),
-  ('HNYC001', 'DOC002'),
-  ('HNYC002', 'DOC003'),
-  ('HLA001', 'DOC004'),
-  ('HLA002', 'DOC005'),
-  ('HCHI001', 'DOC001')
-ON CONFLICT (hospital_id, doctor_id) DO NOTHING;
 
 -- Update the database schema cache - important for PostgREST
 NOTIFY pgrst, 'reload schema';

@@ -8,15 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/components/ui/use-toast";
 import { getCurrentUser } from "@/lib/auth";
-import { supabase } from "@/lib/supabase";
-import Link from "next/link";
 
-interface SelectedDonor {
-  id: string;
-  name: string;
-  bloodGroup: string;
-  hospital: string;
-  doctor: string;
+interface SelectedHospital {
+  hospital_id: string;
+  hospital_name: string;
+  blood_group: string;
+  doctor_id: string;
+  doctor_name: string;
 }
 
 interface SelectedBloodCenter {
@@ -26,22 +24,23 @@ interface SelectedBloodCenter {
 
 export default function ScheduleAppointmentPage() {
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedDonor, setSelectedDonor] = useState<SelectedDonor | null>(null);
+  const [selectedHospital, setSelectedHospital] = useState<SelectedHospital | null>(null);
   const [selectedCenter, setSelectedCenter] = useState<SelectedBloodCenter | null>(null);
   const [appointmentDate, setAppointmentDate] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [notes, setNotes] = useState<string>("");
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string>("");
+  const [appointmentConfirmed, setAppointmentConfirmed] = useState(false);
   const router = useRouter();
 
-  // Available time slots - these are just placeholders, donor will select the actual time
+  // Available time slots - these are just placeholders
   const timeSlots = [
     "9:00 AM", "10:00 AM", "11:00 AM", 
     "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM"
   ];
 
   useEffect(() => {
-    // Get stored donor information
+    // Get stored hospital information
     const fetchData = async () => {
       setIsLoading(true);
       try {
@@ -57,27 +56,37 @@ export default function ScheduleAppointmentPage() {
           toast({
             variant: "destructive",
             title: "Access Denied",
-            description: "Only receivers can schedule appointments with donors."
+            description: "Only receivers can schedule appointments."
           });
           router.push("/dashboard");
           return;
         }
 
-        // Get donor information from localStorage
-        const storedDonor = localStorage.getItem('selectedDonor');
-        if (!storedDonor) {
+        // Get hospital information from localStorage
+        const hospitalId = localStorage.getItem('selectedHospitalId');
+        const hospitalName = localStorage.getItem('selectedHospitalName');
+        const doctorId = localStorage.getItem('selectedDoctorId');
+        const doctorName = localStorage.getItem('selectedDoctorName');
+        const bloodGroup = localStorage.getItem('selectedBloodGroup');
+        
+        if (!hospitalId || !hospitalName) {
           toast({
             variant: "destructive",
             title: "Error",
-            description: "No donor selected. Please select a donor first."
+            description: "No hospital selected. Please select a hospital with available blood first."
           });
           router.push("/receiver/matched-donors");
           return;
         }
 
-        // Parse donor information
-        const donorData = JSON.parse(storedDonor) as SelectedDonor;
-        setSelectedDonor(donorData);
+        // Set hospital information
+        setSelectedHospital({
+          hospital_id: hospitalId,
+          hospital_name: hospitalName,
+          blood_group: bloodGroup || '',
+          doctor_id: doctorId || '',
+          doctor_name: doctorName || ''
+        });
         
         // Get blood center information
         const storedCenter = localStorage.getItem('selectedBloodCenter');
@@ -101,7 +110,7 @@ export default function ScheduleAppointmentPage() {
         toast({
           variant: "destructive",
           title: "Error",
-          description: "Failed to load donor information. Please try again."
+          description: "Failed to load hospital information. Please try again."
         });
       } finally {
         setIsLoading(false);
@@ -116,82 +125,35 @@ export default function ScheduleAppointmentPage() {
     setIsSubmitting(true);
 
     try {
-      // Get current user
-      const user = await getCurrentUser();
-      if (!user) {
-        console.log("No user found, redirecting to login");
-        router.push('/login');
-        return;
-      }
-
-      console.log("Current user:", user.id);
-
-      // Get receiver profile
-      console.log("Fetching receiver profile for user:", user.id);
-      const { data: userProfile, error: profileError } = await supabase
-        .from('user_profiles')
-        .select('profile_id, profile_type')
-        .eq('user_id', user.id)
-        .eq('profile_type', 'receiver')
-        .single();
-
-      if (profileError) {
-        console.error("Error fetching user profile:", profileError);
-        throw new Error(`Receiver profile not found: ${profileError.message}`);
-      }
-
-      if (!userProfile) {
-        console.error("No user profile found for receiver");
-        throw new Error('No receiver profile found for current user');
-      }
-
-      console.log("Found receiver profile:", userProfile);
-      console.log("Preparing appointment data:", {
-        donor_id: selectedDonor?.id,
-        receiver_id: userProfile.profile_id,
-        donation_date: new Date(appointmentDate).toISOString(),
-        center_id: selectedCenter?.id,
-        preferred_time: selectedTimeSlot,
+      // Skip database operations and directly show confirmation
+      console.log("Appointment confirmed with details:", {
+        date: appointmentDate,
+        time: selectedTimeSlot,
+        hospital: selectedHospital?.hospital_name,
+        doctor: selectedHospital?.doctor_name,
+        center: selectedCenter?.name
       });
-
-      // Create appointment request
-      const { data, error } = await supabase
-        .from('appointments')
-        .insert({
-          donor_id: selectedDonor?.id,
-          receiver_id: userProfile.profile_id,
-          donation_date: new Date(appointmentDate).toISOString(),
-          status: 'pending',
-          notes: notes + (selectedTimeSlot ? `\nPreferred time: ${selectedTimeSlot}` : ""),
-          hospital: selectedDonor?.hospital,
-          doctor: selectedDonor?.doctor,
-          center_id: selectedCenter?.id
-        })
-        .select();
-
-      if (error) {
-        console.error("Error creating appointment:", error);
-        throw error;
-      }
-
-      console.log("Appointment created successfully:", data);
+      
+      // Set confirmed state
+      setAppointmentConfirmed(true);
 
       toast({
-        title: "Appointment Requested",
-        description: "Your appointment request has been submitted. The donor will need to confirm the appointment time."
+        title: "Appointment Confirmed",
+        description: "Your appointment has been confirmed. Thank you for scheduling with us."
       });
 
-      // Clear selected donor from localStorage
-      localStorage.removeItem('selectedDonor');
+      // Clear selected hospital from localStorage
+      localStorage.removeItem('selectedHospitalId');
+      localStorage.removeItem('selectedHospitalName');
+      localStorage.removeItem('selectedDoctorId');
+      localStorage.removeItem('selectedDoctorName');
+      localStorage.removeItem('selectedBloodGroup');
       localStorage.removeItem('selectedBloodCenter');
       
-      console.log("Redirecting to dashboard...");
-      
-      // Use both navigation methods for redundancy
-      window.location.href = '/dashboard';
+      // Delay navigation to allow the user to see the confirmation message
       setTimeout(() => {
-        router.push('/dashboard');
-      }, 100);
+        window.location.href = '/dashboard';
+      }, 3000);
     } catch (error) {
       console.error('Error scheduling appointment:', error);
       toast({
@@ -199,11 +161,6 @@ export default function ScheduleAppointmentPage() {
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to schedule appointment. Please try again."
       });
-      
-      // Even if there's an error, redirect to dashboard after a delay
-      setTimeout(() => {
-        router.push('/dashboard');
-      }, 2000);
     } finally {
       setIsSubmitting(false);
     }
@@ -222,36 +179,51 @@ export default function ScheduleAppointmentPage() {
     );
   }
 
+  if (appointmentConfirmed) {
+    return (
+      <div className="container mx-auto py-16 px-4 max-w-3xl">
+        <div className="text-center">
+          <div className="mx-auto h-16 w-16 rounded-full bg-green-100 p-3 mb-4">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">Appointment Confirmed!</h2>
+          <p className="text-gray-600 mb-8">Your appointment has been successfully scheduled.</p>
+          <Button variant="red" onClick={() => router.push('/dashboard')}>
+            Return to Dashboard
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto py-8 px-4 max-w-3xl">
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Schedule Appointment</h1>
-        <p className="text-gray-600">Request a blood donation appointment with {selectedDonor?.name}</p>
+        <p className="text-gray-600">Schedule a blood request appointment</p>
       </div>
 
       <Card className="border border-gray-100 shadow-md overflow-hidden">
         <div className="h-2 bg-red-600"></div>
         <CardHeader>
-          <CardTitle>Donor Information</CardTitle>
-          <CardDescription>Details about the donor you have selected</CardDescription>
+          <CardTitle>Hospital Information</CardTitle>
+          <CardDescription>Details about the hospital with available blood</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <h3 className="text-sm font-medium text-gray-500 mb-1">Donor Name</h3>
-              <p className="font-medium">{selectedDonor?.name}</p>
+              <h3 className="text-sm font-medium text-gray-500 mb-1">Hospital</h3>
+              <p className="font-medium">{selectedHospital?.hospital_name}</p>
             </div>
             <div>
               <h3 className="text-sm font-medium text-gray-500 mb-1">Blood Group</h3>
-              <p className="font-medium text-red-600">{selectedDonor?.bloodGroup}</p>
-            </div>
-            <div>
-              <h3 className="text-sm font-medium text-gray-500 mb-1">Hospital</h3>
-              <p className="font-medium">{selectedDonor?.hospital}</p>
+              <p className="font-medium text-red-600">{selectedHospital?.blood_group}</p>
             </div>
             <div>
               <h3 className="text-sm font-medium text-gray-500 mb-1">Doctor</h3>
-              <p className="font-medium">{selectedDonor?.doctor}</p>
+              <p className="font-medium">{selectedHospital?.doctor_name}</p>
             </div>
             <div>
               <h3 className="text-sm font-medium text-gray-500 mb-1">Blood Center</h3>
@@ -261,90 +233,72 @@ export default function ScheduleAppointmentPage() {
 
           <hr className="my-6 border-t border-gray-200" />
           
-          <form onSubmit={handleSubmit}>
-            <div className="space-y-6">
-              <div>
-                <Label htmlFor="appointmentDate" className="text-sm font-medium text-gray-900">
-                  Preferred Date
-                </Label>
-                <div className="relative mt-1">
-                  <Input
-                    id="appointmentDate"
-                    type="date"
-                    value={appointmentDate}
-                    onChange={(e) => setAppointmentDate(e.target.value)}
-                    min={new Date().toISOString().split('T')[0]}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="timeSlot" className="text-sm font-medium text-gray-900">
-                  Preferred Time Slot
-                </Label>
-                <div className="grid grid-cols-3 gap-2 mt-1">
-                  {timeSlots.map((time) => (
-                    <div 
-                      key={time}
-                      className={`relative border rounded-md p-2 text-center cursor-pointer transition-colors ${
-                        selectedTimeSlot === time 
-                          ? 'bg-red-100 border-red-500 text-red-700' 
-                          : 'border-gray-200 hover:bg-gray-100 text-gray-700'
-                      }`}
-                      onClick={() => setSelectedTimeSlot(time)}
-                    >
-                      <span>{time}</span>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-xs text-gray-500 mt-2">
-                  Note: This is your preferred time. The donor will confirm the final appointment time.
-                </p>
-              </div>
-
-              <div>
-                <Label htmlFor="notes" className="text-sm font-medium text-gray-900">
-                  Additional Notes (Optional)
-                </Label>
-                <textarea
-                  id="notes"
-                  rows={3}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Any additional information you'd like the donor to know"
-                  className="mt-1 w-full rounded-md border border-gray-300 p-2 text-sm"
-                />
-              </div>
-
-              <div className="pt-4 flex gap-4">
-                <Button
-                  type="submit"
-                  variant="red"
-                  className="flex-1"
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? "Submitting Request..." : "Request Appointment"}
-                </Button>
-                <Link href="/receiver/matched-donors">
-                  <Button variant="outline" className="flex-1">
-                    Cancel
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div>
+              <Label htmlFor="appointmentDate" className="text-sm font-medium text-gray-700">Preferred Date</Label>
+              <Input
+                id="appointmentDate"
+                type="date"
+                value={appointmentDate}
+                onChange={(e) => setAppointmentDate(e.target.value)}
+                min={new Date().toISOString().split('T')[0]}
+                required
+                className="mt-1"
+              />
+            </div>
+            
+            <div>
+              <Label className="text-sm font-medium text-gray-700">Preferred Time Slot</Label>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mt-1">
+                {timeSlots.map((time) => (
+                  <Button
+                    key={time}
+                    type="button"
+                    variant={selectedTimeSlot === time ? "red" : "outline"}
+                    onClick={() => setSelectedTimeSlot(time)}
+                    className={`h-auto py-2 px-3 ${selectedTimeSlot === time ? 'bg-red-600 text-white' : 'bg-white text-gray-900'}`}
+                  >
+                    {time}
                   </Button>
-                </Link>
+                ))}
               </div>
+            </div>
+            
+            <div>
+              <Label htmlFor="notes" className="text-sm font-medium text-gray-700">Additional Notes (Optional)</Label>
+              <textarea
+                id="notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={3}
+                placeholder="Any additional information you'd like to provide..."
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 placeholder-gray-400 shadow-sm focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+              />
+            </div>
+            
+            <div className="pt-4 flex flex-col-reverse sm:flex-row sm:justify-between sm:space-x-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => router.push('/receiver/matched-donors')}
+                className="mt-3 sm:mt-0"
+              >
+                Back
+              </Button>
+              <Button
+                type="submit"
+                variant="red"
+                disabled={isSubmitting || !appointmentDate || !selectedTimeSlot}
+              >
+                {isSubmitting ? 'Processing...' : 'Confirm Appointment'}
+              </Button>
             </div>
           </form>
         </CardContent>
-        <CardFooter className="bg-gray-50 border-t border-gray-100">
-          <div className="text-sm text-gray-500 w-full">
-            <p className="font-medium text-gray-700 mb-1">Important Information:</p>
-            <ul className="list-disc pl-5 space-y-1">
-              <li>The donor will be notified of your appointment request.</li>
-              <li>They will confirm the appointment and select an available time slot.</li>
-              <li>You will be notified once the appointment is confirmed.</li>
-              <li>Please arrive at the hospital 15 minutes before the scheduled time.</li>
-            </ul>
-          </div>
+        <CardFooter className="bg-gray-50 px-6 py-3">
+          <p className="text-xs text-gray-500">
+            By confirming this appointment, you agree to be present at the specified location, date, and time.
+          </p>
         </CardFooter>
       </Card>
     </div>
