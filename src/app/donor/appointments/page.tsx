@@ -10,9 +10,11 @@ import { supabase } from "@/lib/supabase";
 
 interface Appointment {
   appointment_id: string;
-  appointment_date: string;
+  donation_date: string;
   status: string;
   notes: string;
+  hospital?: string;
+  doctor?: string;
   blood_center: {
     center_name: string;
     address: string;
@@ -57,7 +59,7 @@ export default function AppointmentsPage() {
           .from('appointments')
           .select(`
             *,
-            blood_center:blood_center_id (
+            blood_center:center_id (
               center_name,
               address
             ),
@@ -67,7 +69,7 @@ export default function AppointmentsPage() {
             )
           `)
           .eq('donor_id', userProfile.profile_id)
-          .order('appointment_date', { ascending: true });
+          .order('donation_date', { ascending: true });
 
         if (error) throw error;
 
@@ -160,7 +162,7 @@ export default function AppointmentsPage() {
                       Appointment at {appointment.blood_center.center_name}
                     </CardTitle>
                     <CardDescription>
-                      {new Date(appointment.appointment_date).toLocaleString()}
+                      {new Date(appointment.donation_date).toLocaleString()}
                     </CardDescription>
                   </div>
                   <span className={`px-3 py-1 rounded-full text-sm font-medium ${
@@ -177,13 +179,14 @@ export default function AppointmentsPage() {
                 <div className="space-y-4">
                   <div>
                     <h4 className="text-sm font-medium text-gray-500">Location</h4>
-                    <p className="text-gray-900">{appointment.blood_center.address}</p>
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-medium text-gray-500">Receiver Details</h4>
-                    <p className="text-gray-900">
-                      {appointment.receiver.receiver_name} (Blood Group: {appointment.receiver.r_bgrp})
-                    </p>
+                    <div className="flex flex-col text-sm">
+                      <span>Receiver: {appointment.receiver.receiver_name}</span>
+                      <span>Blood Group: {appointment.receiver.r_bgrp}</span>
+                      <span>Blood Center: {appointment.blood_center.center_name}</span>
+                      <span>Address: {appointment.blood_center.address}</span>
+                      {appointment.hospital && <span>Hospital: {appointment.hospital}</span>}
+                      {appointment.doctor && <span>Doctor: {appointment.doctor}</span>}
+                    </div>
                   </div>
                   {appointment.notes && (
                     <div>

@@ -28,6 +28,8 @@ export interface Database {
           donor_phno?: string;
           city_id?: string;
           staff_id?: string;
+          hospital_id?: string;
+          doctor_id?: string;
         };
         Insert: {
           donor_id: string;
@@ -38,6 +40,8 @@ export interface Database {
           donor_phno?: string;
           city_id?: string;
           staff_id?: string;
+          hospital_id?: string;
+          doctor_id?: string;
         };
         Update: {
           donor_id?: string;
@@ -48,6 +52,8 @@ export interface Database {
           donor_phno?: string;
           city_id?: string;
           staff_id?: string;
+          hospital_id?: string;
+          doctor_id?: string;
         };
       };
       receiver: {

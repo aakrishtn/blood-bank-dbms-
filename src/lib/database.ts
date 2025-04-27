@@ -58,6 +58,49 @@ export const cityAPI = {
   }
 };
 
+// Hospital API
+export const hospitalAPI = {
+  async getAllHospitals() {
+    const { data, error } = await supabase
+      .from('hospital')
+      .select('*, city(city_name), manager(m_name)');
+    if (error) throw error;
+    return data || [];
+  },
+  
+  async getHospitalById(hospitalId: string) {
+    const { data, error } = await supabase
+      .from('hospital')
+      .select('*, city(city_name), manager(m_name)')
+      .eq('h_id', hospitalId)
+      .single();
+    if (error) throw error;
+    return data;
+  },
+  
+  async getHospitalsByCity(cityId: string) {
+    const { data, error } = await supabase
+      .from('hospital')
+      .select('*, city(city_name)')
+      .eq('city_id', cityId);
+    if (error) throw error;
+    return data || [];
+  },
+  
+  async addHospital(hospital: {
+    h_id: string;
+    h_name: string;
+    h_bgrprequired?: string;
+    h_bgrpreceived?: string;
+    city_id?: string;
+    m_id?: string;
+  }) {
+    const { data, error } = await supabase.from('hospital').insert(hospital);
+    if (error) throw error;
+    return data;
+  }
+};
+
 // Donor API
 export const donorAPI = {
   async getAllDonors() {
@@ -270,79 +313,16 @@ export const bloodSampleAPI = {
   },
   
   async updateBloodSampleStatus(sampleId: string, status: string) {
-    const { data, error } = await supabase.rpc('update_blood_sample_status', {
-      sample_id_param: sampleId,
-      new_status: status
-    });
+    const { data, error } = await supabase
+      .from('blood_sample')
+      .update({ status })
+      .eq('sample_id', sampleId);
     if (error) throw error;
     return data;
   },
   
   async deleteBloodSample(sampleId: string) {
     const { error } = await supabase.from('blood_sample').delete().eq('sample_id', sampleId);
-    if (error) throw error;
-  }
-};
-
-// Hospital API
-export const hospitalAPI = {
-  async getAllHospitals() {
-    const { data, error } = await supabase
-      .from('hospital')
-      .select('*, city(city_name), manager(m_name)');
-    if (error) throw error;
-    return data;
-  },
-  
-  async getHospitalById(hospitalId: string) {
-    const { data, error } = await supabase
-      .from('hospital')
-      .select('*, city(city_name), manager(m_name)')
-      .eq('h_id', hospitalId)
-      .single();
-    if (error) throw error;
-    return data;
-  },
-  
-  async getHospitalsByCity(cityId: string) {
-    const { data, error } = await supabase
-      .from('hospital')
-      .select('*')
-      .eq('city_id', cityId);
-    if (error) throw error;
-    return data;
-  },
-  
-  async addHospital(hospital: {
-    h_id: string;
-    h_name: string;
-    h_bgrprequired?: string;
-    h_bgrpreceived?: string;
-    city_id?: string;
-    m_id?: string;
-  }) {
-    const { data, error } = await supabase.from('hospital').insert(hospital);
-    if (error) throw error;
-    return data;
-  },
-  
-  async updateHospital(hospitalId: string, hospital: Partial<{
-    h_name: string;
-    h_bgrprequired: string;
-    h_bgrpreceived: string;
-    city_id: string;
-    m_id: string;
-  }>) {
-    const { data, error } = await supabase
-      .from('hospital')
-      .update(hospital)
-      .eq('h_id', hospitalId);
-    if (error) throw error;
-    return data;
-  },
-  
-  async deleteHospital(hospitalId: string) {
-    const { error } = await supabase.from('hospital').delete().eq('h_id', hospitalId);
     if (error) throw error;
   }
 };

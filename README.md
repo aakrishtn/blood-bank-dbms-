@@ -1,112 +1,120 @@
 # Blood Bank Management System
 
-A comprehensive blood bank management system built with Next.js, Supabase, and shadcn/ui.
+A comprehensive blood bank management system built with Next.js, TypeScript, and Supabase. This application allows donors to register, make appointments, and receivers to request blood donations, all within a secure and user-friendly interface.
 
 ## Features
 
-- User authentication (donors, receivers, hospitals)
+- User authentication and role-based access control
 - Donor registration and management
-- Receiver registration and blood requests
-- Blood sample inventory management
-- Blood compatibility matching
-- Modern UI with shadcn/ui components
-
-## Database Schema
-
-The system follows a relational model with the following main entities:
-
-- Donor
-- Receiver
-- Hospital
-- Blood Sample
-- City
-- Staff
-- Manager
-- Doctor
-
-The database includes triggers, stored procedures, and RLS (Row Level Security) policies for data integrity and security.
+- Blood receiver management
+- Appointment scheduling
+- Inventory tracking
+- Hospital and blood center integration
+- Dashboard with real-time updates
 
 ## Tech Stack
 
-- **Frontend**: Next.js, React, TypeScript, Tailwind CSS
-- **UI Components**: shadcn/ui (based on Radix UI)
-- **Backend**: Supabase (PostgreSQL)
-- **Authentication**: Custom auth with Supabase Auth
+- **Frontend**: Next.js 15.3, React 19, TailwindCSS
+- **Authentication**: Supabase Auth
+- **Database**: PostgreSQL (via Supabase)
+- **UI Components**: Custom components + Radix UI
+- **Styling**: TailwindCSS, shadcn/ui inspired components
+
+## Database Schema
+
+The application uses a relational database with the following main tables:
+
+- Users - Authentication and user roles
+- Donors - Blood donor profiles
+- Receivers - Blood request profiles
+- Hospitals - Medical facilities information
+- Appointments - Donation appointments
+- Blood Samples - Inventory tracking
+- Cities - Location data for donors and facilities
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 18+ and npm
-- Supabase account
+- Node.js 18.0 or higher
+- npm or yarn
+- A Supabase account
 
-### Setup
+### Setting up Supabase
 
-1. Clone the repository:
+1. Create a new project in Supabase
+2. Get your API credentials from the Supabase dashboard
+3. Create a `.env.local` file in the project root with the following:
 
-```bash
-git clone <repository-url>
-cd blood_bank_management_system
+```
+NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 ```
 
-2. Install dependencies:
+### Database Setup
+
+1. Create a `.env` file in the project root with your Supabase credentials (same as above)
+2. Run the database setup script:
 
 ```bash
+# Install dotenv package (if not already installed)
+npm install dotenv
+
+# Run the database setup script
+node setup-db.mjs
+```
+
+Alternatively, you can manually run the SQL statements in the `schema.sql` file using the Supabase SQL editor.
+
+### Installation
+
+```bash
+# Install dependencies
 npm install
-```
 
-3. Create a Supabase project and set up the database:
-
-   - Create a new project in Supabase
-   - Run the SQL commands from `supabase/schema.sql` in the SQL Editor
-
-4. Set up environment variables:
-
-   - Copy `.env.local.example` to `.env.local`
-   - Update the Supabase URL and anon key in `.env.local`
-
-5. Run the development server:
-
-```bash
+# Run the development server
 npm run dev
 ```
 
-6. Open [http://localhost:3000](http://localhost:3000) in your browser.
+### Development
 
-## Database Operations
+```bash
+# Start the development server
+npm run dev
 
-The system implements various database operations:
+# Build for production
+npm run build
 
-- **Triggers**: For validating blood groups
-- **Stored Procedures**: For matching compatible donors with receivers
-- **RLS Policies**: For controlling access to data based on user roles
-- **Indexes**: For optimizing queries on frequently accessed fields
+# Start the production server
+npm start
+```
 
 ## Project Structure
 
 ```
 blood_bank_management_system/
-├── public/                 # Static assets
+├── public/            # Static assets
 ├── src/
-│   ├── app/                # Next.js app routes
-│   │   ├── dashboard/      # Dashboard pages
-│   │   ├── login/          # Authentication pages
-│   │   ├── donor/          # Donor-specific pages
-│   │   ├── receiver/       # Receiver-specific pages
-│   │   └── hospital/       # Hospital-specific pages
-│   ├── components/         # React components
-│   │   └── ui/             # UI components from shadcn/ui
-│   └── lib/                # Utility functions
-│       ├── auth.ts         # Authentication functions
-│       ├── database.ts     # Database API functions
-│       ├── supabase.ts     # Supabase client
-│       └── utils.ts        # Helper functions
-└── supabase/
-    └── schema.sql          # Database schema
+│   ├── app/           # Next.js app router
+│   │   ├── api/       # API routes
+│   │   ├── donor/     # Donor pages
+│   │   ├── receiver/  # Receiver pages
+│   │   └── ...        # Other routes
+│   ├── components/    # Reusable UI components
+│   │   └── ui/        # UI component library
+│   ├── lib/           # Utility functions
+│   └── types/         # TypeScript type definitions
+├── schema.sql         # Database schema
+├── setup-db.mjs       # Database setup script
+├── .env.local         # Environment variables (create this)
+└── ...                # Config files
 ```
 
-## Limitations
+## Contributing
 
-- The blood tracking system is simplified for demonstration purposes
-- Limited reporting capabilities
-- Simplified hospital integration
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct, and the process for submitting pull requests.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.

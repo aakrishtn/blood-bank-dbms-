@@ -3,13 +3,14 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getCurrentUser, signOut } from "@/lib/auth";
-import { donorAPI, receiverAPI, hospitalAPI, bloodSampleAPI } from "@/lib/database";
+import { donorAPI, receiverAPI, bloodSampleAPI } from "@/lib/database";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "@/components/ui/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Link from "next/link";
 import { getManualDonorId } from "@/lib/donation-profile-manager";
+import { supabase } from "@/lib/supabase";
 
 // Define types for our data
 interface UserData {
@@ -45,16 +46,6 @@ interface ReceiverProfile {
   };
 }
 
-interface HospitalProfile {
-  h_id: string;
-  h_name: string;
-  h_bgrprequired?: string;
-  h_bgrpreceived?: string;
-  city?: {
-    city_name: string;
-  };
-}
-
 interface BloodSample {
   sample_id: string;
   blood_grp: string;
@@ -76,11 +67,7 @@ function isReceiverProfile(profile: ProfileData): profile is ReceiverProfile {
   return 'receiver_id' in profile;
 }
 
-function isHospitalProfile(profile: ProfileData): profile is HospitalProfile {
-  return 'h_id' in profile;
-}
-
-type ProfileData = DonorProfile | ReceiverProfile | HospitalProfile;
+type ProfileData = DonorProfile | ReceiverProfile;
 
 export default function DashboardPage() {
   const [userData, setUserData] = useState<UserData | null>(null);
@@ -195,18 +182,79 @@ export default function DashboardPage() {
               });
             }
           } else if (userRole === 'receiver') {
+            // Get all receivers
             const receivers = await receiverAPI.getAllReceivers();
-            const receiverProfile = receivers.find(receiver => 
-              receiver.r_phno === user.email || 
-              receiver.receiver_name.toLowerCase() === user.user_metadata?.name?.toLowerCase()
-            );
-            setProfileData(receiverProfile || null);
-          } else if (userRole === 'hospital') {
-            const hospitals = await hospitalAPI.getAllHospitals();
-            const hospitalProfile = hospitals.find(hospital => 
-              hospital.h_name.toLowerCase() === user.user_metadata?.name?.toLowerCase()
-            );
-            setProfileData(hospitalProfile || null);
+            console.log("All receivers:", receivers);
+            console.log("User email:", user.email);
+            
+            // Variable to store found profile
+            let foundProfile = null;
+            
+            // First try to find receiver by user metadata
+            if (user.user_metadata?.receiverId) {
+              console.log("Trying to match using receiverId from metadata:", user.user_metadata.receiverId);
+              foundProfile = receivers.find(receiver => receiver.receiver_id === user.user_metadata.receiverId);
+              if (foundProfile) {
+                console.log("Found receiver profile using receiverId from metadata");
+              }
+            }
+            
+            // If not found, try to find by user_profiles table
+            if (!foundProfile) {
+              console.log("Checking user_profiles table for receiver link");
+              const { data: userProfile, error: profileError } = await supabase
+                .from('user_profiles')
+                .select('profile_id, profile_type')
+                .eq('user_id', user.id)
+                .eq('profile_type', 'receiver')
+                .single();
+              
+              if (!profileError && userProfile) {
+                console.log("Found user profile link:", userProfile);
+                foundProfile = receivers.find(receiver => receiver.receiver_id === userProfile.profile_id);
+                if (foundProfile) {
+                  console.log("Found receiver profile using user_profiles table");
+                }
+              }
+            }
+            
+            // If still not found, try to match by email or name
+            if (!foundProfile && user.email) {
+              console.log("Trying to match by email and name");
+              foundProfile = receivers.find(receiver => 
+                (receiver.r_phno && receiver.r_phno.toLowerCase() === user.email?.toLowerCase()) || 
+                (receiver.receiver_name && user.user_metadata?.name && 
+                 receiver.receiver_name.toLowerCase() === user.user_metadata.name.toLowerCase())
+              );
+              
+              if (foundProfile) {
+                console.log("Found receiver profile by email/name match");
+              }
+            }
+            
+            if (foundProfile) {
+              console.log("Found matching receiver profile:", foundProfile.receiver_id, foundProfile.receiver_name);
+              setProfileData(foundProfile);
+            } else {
+              console.log("No matching receiver profile found for user:", user.email);
+              setProfileData(null);
+              
+              // Show toast with link to registration
+              toast({
+                variant: "destructive",
+                title: "Profile not found",
+                description: (
+                  <div>
+                    <p>Your receiver profile could not be found automatically.</p>
+                    <p className="mt-2">
+                      <a href="/receiver/register" className="underline font-medium">
+                        Click here to register as a receiver
+                      </a>
+                    </p>
+                  </div>
+                )
+              });
+            }
           }
         } catch (profileError) {
           console.error("Error fetching profile:", profileError);
@@ -245,12 +293,22 @@ export default function DashboardPage() {
             const manualDonorId = getManualDonorId();
             
             if (manualDonorId) {
-              // Use the manually set donor ID
-              const donorData = await donorAPI.getDonorById(manualDonorId);
-              setProfileData(donorData);
+              try {
+                // Use the manually set donor ID
+                const donorData = await donorAPI.getDonorById(manualDonorId);
+                if (donorData) {
+                  setProfileData(donorData);
+                } else {
+                  console.log("No donor data found for manual ID:", manualDonorId);
+                }
+              } catch (donorError) {
+                console.error("Error fetching donor profile with ID:", manualDonorId, donorError);
+                // Don't throw, just log error and continue
+              }
             }
           } catch (error) {
-            console.error("Error fetching donor profile:", error);
+            console.error("Error in donor profile handling:", error);
+            // Don't throw, allow dashboard to load with other data
           }
         }
       } catch (error) {
@@ -338,6 +396,58 @@ export default function DashboardPage() {
             });
           }
         }
+      } else if (userRole === "receiver") {
+        // Get the receivers and try to find the profile
+        const receivers = await receiverAPI.getAllReceivers();
+        
+        // First try to find by user profile link
+        const { data: userProfile, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('profile_id')
+          .eq('user_id', user.id)
+          .eq('profile_type', 'receiver')
+          .single();
+        
+        let foundReceiverProfile = null;
+        
+        if (!profileError && userProfile) {
+          foundReceiverProfile = receivers.find(
+            receiver => receiver.receiver_id === userProfile.profile_id
+          );
+        }
+        
+        // If not found by profile link, try metadata or email
+        if (!foundReceiverProfile) {
+          foundReceiverProfile = receivers.find(
+            receiver => (user.user_metadata?.receiverId && 
+                         receiver.receiver_id === user.user_metadata.receiverId) ||
+                        (receiver.r_phno && user.email && 
+                         receiver.r_phno.toLowerCase() === user.email.toLowerCase())
+          );
+        }
+        
+        if (foundReceiverProfile) {
+          setProfileData(foundReceiverProfile);
+          toast({
+            title: "Profile refreshed",
+            description: "Your receiver profile has been updated"
+          });
+        } else {
+          toast({
+            variant: "destructive",
+            title: "Profile not found",
+            description: (
+              <div>
+                <p>Your receiver profile could not be found automatically.</p>
+                <p className="mt-2">
+                  <a href="/receiver/register" className="underline font-medium">
+                    Click here to register as a receiver
+                  </a>
+                </p>
+              </div>
+            )
+          });
+        }
       }
     } catch (error) {
       console.error("Error refreshing profile:", error);
@@ -382,7 +492,7 @@ export default function DashboardPage() {
           <Card className="border border-gray-100 shadow-md overflow-hidden">
             <div className="h-2 bg-red-600"></div>
             <CardHeader>
-              <CardTitle className="text-black">{userRole === "donor" ? "Donor Profile" : userRole === "receiver" ? "Receiver Profile" : "Hospital Profile"}</CardTitle>
+              <CardTitle className="text-black">{userRole === "donor" ? "Donor Profile" : "Receiver Profile"}</CardTitle>
               <CardDescription className="text-black font-medium">Your registration details</CardDescription>
             </CardHeader>
             <CardContent>
@@ -425,27 +535,6 @@ export default function DashboardPage() {
                       </div>
                     </>
                   )}
-                  
-                  {userRole === "hospital" && isHospitalProfile(profileData) && (
-                    <>
-                      <div>
-                        <p className="text-sm text-gray-500">Hospital Name</p>
-                        <p>{profileData.h_name}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">City</p>
-                        <p>{profileData.city?.city_name || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Blood Group Required</p>
-                        <p className="font-medium text-red-600">{profileData.h_bgrprequired || "None"}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Blood Group Received</p>
-                        <p>{profileData.h_bgrpreceived || "None"}</p>
-                      </div>
-                    </>
-                  )}
                 </div>
               ) : (
                 <p className="text-black font-medium">No profile data available.</p>
@@ -458,9 +547,14 @@ export default function DashboardPage() {
                 </Button>
               ) : (
                 <>
-                  <Link href="/donor/register" className="w-full">
-                    <Button variant="red" className="w-full">Register as a Donor</Button>
-                  </Link>
+                  <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Link href="/donor/register">
+                      <Button variant="red" className="w-full">Register as a Donor</Button>
+                    </Link>
+                    <Link href="/receiver/register">
+                      <Button variant="red" className="w-full">Register as a Receiver</Button>
+                    </Link>
+                  </div>
                   <Button 
                     variant="outline" 
                     className="w-full" 
@@ -471,7 +565,7 @@ export default function DashboardPage() {
                   </Button>
                 </>
               )}
-              {userRole === "receiver" && (
+              {userRole === "receiver" && profileData && (
                 <Link href="/receiver/matched-donors">
                   <Button variant="red" className="w-full">
                     Find Matching Donors
@@ -636,11 +730,6 @@ export default function DashboardPage() {
                     </table>
                   </div>
                 </CardContent>
-                {userRole === "hospital" && (
-                  <CardFooter>
-                    <Button variant="red" className="w-full">Request Blood Sample</Button>
-                  </CardFooter>
-                )}
               </Card>
             </TabsContent>
           </Tabs>

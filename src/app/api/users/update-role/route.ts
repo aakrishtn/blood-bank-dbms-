@@ -11,7 +11,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 export async function POST(request: Request) {
   try {
-    const { userId, role, donorDetails } = await request.json();
+    const { userId, role, donorDetails, receiverDetails } = await request.json();
 
     if (!userId || !role) {
       return NextResponse.json(
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     }
 
     // Validate that role is one of the allowed values
-    const validRoles = ['donor', 'receiver', 'hospital', 'staff', 'doctor', 'manager'];
+    const validRoles = ['donor', 'receiver', 'staff', 'doctor', 'manager'];
     if (!validRoles.includes(role)) {
       return NextResponse.json(
         { error: 'Invalid role specified' },
@@ -36,6 +36,13 @@ export async function POST(request: Request) {
       donorName?: string;
       donorBloodGroup?: string;
       donorAge?: number;
+      hospitalId?: string;
+      doctorId?: string;
+      doctorName?: string;
+      receiverId?: string;
+      receiverName?: string;
+      receiverBloodGroup?: string;
+      receiverAge?: number;
     } = { role };
 
     // If donor details are provided, add them to the metadata
@@ -45,6 +52,28 @@ export async function POST(request: Request) {
       userMetadata.donorName = donorDetails.donor_name;
       userMetadata.donorBloodGroup = donorDetails.donor_bgrp;
       userMetadata.donorAge = donorDetails.donor_age;
+      
+      // Add hospital and doctor information if provided
+      if (donorDetails.hospital_id) {
+        userMetadata.hospitalId = donorDetails.hospital_id;
+      }
+      
+      if (donorDetails.doctor_id) {
+        userMetadata.doctorId = donorDetails.doctor_id;
+      }
+      
+      if (donorDetails.doctor_name) {
+        userMetadata.doctorName = donorDetails.doctor_name;
+      }
+    }
+
+    // If receiver details are provided, add them to the metadata
+    if (receiverDetails && role === 'receiver') {
+      // Add receiver details to user metadata for easier profile matching
+      userMetadata.receiverId = receiverDetails.receiver_id;
+      userMetadata.receiverName = receiverDetails.receiver_name;
+      userMetadata.receiverBloodGroup = receiverDetails.r_bgrp;
+      userMetadata.receiverAge = receiverDetails.r_age;
     }
 
     // Update user metadata in Supabase auth

@@ -14,23 +14,28 @@ import { getCurrentUser } from "@/lib/auth";
 interface Appointment {
   id: string;
   donor_id?: string;
-  appointment_date: string;
-  appointment_time: string;
-  location?: string;
+  donation_date: string;
+  time_slot: string;
+  center_id?: string;
+  center_name?: string;
   blood_group?: string;
-  status: 'scheduled' | 'completed' | 'cancelled';
+  status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
   notes?: string;
+  hospital?: string;
+  doctor?: string;
 }
 
 interface AppointmentResponse {
-  id: string;
+  appointment_id: string;
   donor_id: string;
-  appointment_date: string;
-  appointment_time: string;
-  location?: string;
-  blood_group?: string;
+  donation_date: string;
+  center_id: string;
+  center_name?: string;
+  receiver_id: string;
   status: string;
   notes?: string;
+  hospital?: string;
+  doctor?: string;
 }
 
 interface User {
@@ -81,16 +86,24 @@ export default function AppointmentsPage() {
         const data = await response.json();
         
         // Transform the data to match our component's expected format
-        const formattedAppointments = data.appointments.map((apt: AppointmentResponse) => ({
-          id: apt.id,
-          donor_id: apt.donor_id,
-          appointment_date: apt.appointment_date,
-          appointment_time: apt.appointment_time,
-          location: apt.location,
-          blood_group: apt.blood_group,
-          status: apt.status as 'scheduled' | 'completed' | 'cancelled',
-          notes: apt.notes
-        }));
+        const formattedAppointments = data.appointments && Array.isArray(data.appointments) 
+          ? data.appointments.map((apt: AppointmentResponse) => {
+              // Extract time portion from the ISO date string
+              const date = new Date(apt.donation_date);
+              return {
+                id: apt.appointment_id,
+                donor_id: apt.donor_id,
+                donation_date: date.toISOString().split('T')[0],
+                time_slot: date.toTimeString().split(' ')[0].substring(0, 5),
+                center_id: apt.center_id,
+                center_name: apt.center_name,
+                status: apt.status as 'pending' | 'confirmed' | 'completed' | 'cancelled',
+                notes: apt.notes,
+                hospital: apt.hospital,
+                doctor: apt.doctor
+              };
+            })
+          : [];
         
         setAppointments(formattedAppointments);
         setIsLoading(false);
@@ -124,13 +137,13 @@ export default function AppointmentsPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          donorId: currentUser.id,
-          appointmentDate: date,
-          appointmentTime: time,
-          location,
-          bloodGroup: bloodGroup || currentUser.user_metadata?.bloodGroup,
+          donor_id: currentUser.id,
+          donation_date: `${date}T${time}:00`,
+          center_id: 'BC001', // Default center ID
           notes,
-          status: 'scheduled'
+          hospital: location || 'Default Hospital',
+          doctor: 'Dr. ' + (currentUser.user_metadata?.name || 'Default'),
+          status: 'pending'
         }),
       });
       
@@ -145,12 +158,14 @@ export default function AppointmentsPage() {
       const newAppointment: Appointment = {
         id: data.appointment.id,
         donor_id: data.appointment.donor_id,
-        appointment_date: data.appointment.appointment_date,
-        appointment_time: data.appointment.appointment_time,
-        location: data.appointment.location,
-        blood_group: data.appointment.blood_group,
+        donation_date: data.appointment.donation_date,
+        time_slot: data.appointment.time_slot,
+        center_id: data.appointment.center_id,
+        center_name: data.appointment.center_name,
         status: data.appointment.status,
-        notes: data.appointment.notes
+        notes: data.appointment.notes,
+        hospital: data.appointment.hospital,
+        doctor: data.appointment.doctor
       };
 
       setAppointments([newAppointment, ...appointments]);
@@ -283,7 +298,9 @@ export default function AppointmentsPage() {
             <div className="space-y-4">
               <h2 className="text-xl font-semibold text-black mb-4 text-center">Your Upcoming Appointments</h2>
               
-              {appointments.filter(app => app.status === 'scheduled').length === 0 ? (
+              {appointments
+                .filter(app => app.status === 'pending' || app.status === 'confirmed')
+                .length === 0 ? (
                 <Card className="border border-gray-100 shadow-md overflow-hidden">
                   <div className="h-2 bg-red-600"></div>
                   <CardContent className="flex flex-col items-center justify-center py-12">
@@ -309,7 +326,7 @@ export default function AppointmentsPage() {
                 </Card>
               ) : (
                 appointments
-                  .filter(app => app.status === 'scheduled')
+                  .filter(app => app.status === 'pending' || app.status === 'confirmed')
                   .map(appointment => (
                     <Card key={appointment.id} className="border border-gray-100 shadow-md hover:shadow-xl transition-shadow duration-300 overflow-hidden relative">
                       <div className="h-2 bg-red-600"></div>
@@ -337,12 +354,12 @@ export default function AppointmentsPage() {
                           <div>
                             <p className="text-sm font-medium text-black mb-1">Date & Time</p>
                             <p className="text-sm text-gray-700">
-                              {new Date(appointment.appointment_date).toLocaleDateString()}, {appointment.appointment_time}
+                              {new Date(appointment.donation_date).toLocaleDateString()}, {appointment.time_slot}
                             </p>
                           </div>
                           <div>
                             <p className="text-sm font-medium text-black mb-1">Location</p>
-                            <p className="text-sm text-gray-700">{appointment.location || "Central Blood Bank"}</p>
+                            <p className="text-sm text-gray-700">{appointment.center_name || "Central Blood Bank"}</p>
                           </div>
                           {appointment.blood_group && (
                             <div>
@@ -368,7 +385,9 @@ export default function AppointmentsPage() {
             <div className="space-y-4">
               <h2 className="text-xl font-semibold text-black mb-4 text-center">Appointment History</h2>
               
-              {appointments.filter(app => app.status === 'completed' || app.status === 'cancelled').length === 0 ? (
+              {appointments
+                .filter(app => app.status === 'completed' || app.status === 'cancelled')
+                .length === 0 ? (
                 <Card className="border border-gray-100 shadow-md overflow-hidden">
                   <div className="h-2 bg-red-600"></div>
                   <CardContent className="flex flex-col items-center justify-center py-12">
@@ -405,12 +424,12 @@ export default function AppointmentsPage() {
                           <div>
                             <p className="text-sm font-medium text-black mb-1">Date & Time</p>
                             <p className="text-sm text-gray-700">
-                              {new Date(appointment.appointment_date).toLocaleDateString()}, {appointment.appointment_time}
+                              {new Date(appointment.donation_date).toLocaleDateString()}, {appointment.time_slot}
                             </p>
                           </div>
                           <div>
                             <p className="text-sm font-medium text-black mb-1">Location</p>
-                            <p className="text-sm text-gray-700">{appointment.location || "Central Blood Bank"}</p>
+                            <p className="text-sm text-gray-700">{appointment.center_name || "Central Blood Bank"}</p>
                           </div>
                           {appointment.blood_group && (
                             <div>

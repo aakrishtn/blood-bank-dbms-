@@ -6,6 +6,7 @@ DROP TABLE IF EXISTS users CASCADE;
 DROP TABLE IF EXISTS receiver CASCADE;
 DROP TABLE IF EXISTS donor CASCADE;
 DROP TABLE IF EXISTS blood_sample CASCADE;
+DROP TABLE IF EXISTS hospital_doctor CASCADE;
 DROP TABLE IF EXISTS hospital CASCADE;
 DROP TABLE IF EXISTS blood_center CASCADE;
 DROP TABLE IF EXISTS doctor CASCADE;
@@ -38,7 +39,8 @@ CREATE TABLE IF NOT EXISTS staff (
 CREATE TABLE IF NOT EXISTS doctor (
     doc_id VARCHAR PRIMARY KEY,
     doc_name VARCHAR NOT NULL,
-    doc_phno VARCHAR
+    doc_phno VARCHAR,
+    specialization VARCHAR(100)
 );
 
 -- Create blood center table
@@ -62,7 +64,15 @@ CREATE TABLE IF NOT EXISTS hospital (
     h_bgrprequired VARCHAR,
     h_bgrpreceived VARCHAR,
     city_id VARCHAR REFERENCES city(city_id),
-    m_id VARCHAR REFERENCES manager(m_id)
+    m_id VARCHAR REFERENCES manager(m_id),
+    h_address VARCHAR(255)
+);
+
+-- Create hospital_doctor relationship table
+CREATE TABLE IF NOT EXISTS hospital_doctor (
+    hospital_id VARCHAR REFERENCES hospital(h_id),
+    doctor_id VARCHAR REFERENCES doctor(doc_id),
+    PRIMARY KEY (hospital_id, doctor_id)
 );
 
 -- Create blood sample table
@@ -81,9 +91,12 @@ CREATE TABLE IF NOT EXISTS donor (
     donor_age INT NOT NULL,
     donor_bgrp VARCHAR NOT NULL,
     donor_sex VARCHAR NOT NULL,
-    donor_phno VARCHAR(15),
+    donor_phno VARCHAR(50),
     city_id VARCHAR REFERENCES city(city_id),
-    staff_id VARCHAR REFERENCES staff(staff_id)
+    staff_id VARCHAR REFERENCES staff(staff_id),
+    hospital_id VARCHAR REFERENCES hospital(h_id),
+    doctor_id VARCHAR REFERENCES doctor(doc_id),
+    registration_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Create receiver table
@@ -118,19 +131,18 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     UNIQUE(profile_id, profile_type)
 );
 
--- Create appointments table
+-- Create appointments table with correct data types for foreign keys
 CREATE TABLE IF NOT EXISTS appointments (
     appointment_id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    donor_id VARCHAR REFERENCES donor(donor_id),
-    receiver_id VARCHAR REFERENCES receiver(receiver_id),
-    appointment_date TIMESTAMP WITH TIME ZONE NOT NULL,
-    status VARCHAR(50) DEFAULT 'pending' 
-        CHECK (status IN ('pending', 'confirmed', 'completed', 'cancelled')),
-    blood_center_id VARCHAR REFERENCES blood_center(center_id),
+    donation_date TIMESTAMP NOT NULL,
+    date_created TIMESTAMP DEFAULT NOW(),
+    status VARCHAR(10) DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'completed', 'cancelled')),
     notes TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    CONSTRAINT appointment_date_check CHECK (appointment_date > NOW())
+    hospital VARCHAR(255),
+    doctor VARCHAR(255),
+    donor_id VARCHAR REFERENCES donor(donor_id),
+    center_id VARCHAR REFERENCES blood_center(center_id) NOT NULL,
+    receiver_id VARCHAR REFERENCES receiver(receiver_id) NOT NULL
 );
 
 -- Create appointment notifications table
@@ -150,8 +162,8 @@ WHERE status IN ('pending', 'confirmed');
 CREATE INDEX idx_appointments_donor_id ON appointments(donor_id);
 CREATE INDEX idx_appointments_receiver_id ON appointments(receiver_id);
 CREATE INDEX idx_appointments_status ON appointments(status);
-CREATE INDEX idx_appointments_date ON appointments(appointment_date);
-CREATE INDEX idx_appointments_center ON appointments(blood_center_id);
+CREATE INDEX idx_appointments_date ON appointments(donation_date);
+CREATE INDEX idx_appointments_center ON appointments(center_id);
 CREATE INDEX idx_donor_bgrp ON donor(donor_bgrp);
 CREATE INDEX idx_receiver_bgrp ON receiver(r_bgrp);
 CREATE INDEX idx_blood_sample_grp ON blood_sample(blood_grp);
@@ -161,12 +173,22 @@ CREATE INDEX idx_receiver_city ON receiver(city_id);
 CREATE INDEX idx_blood_center_city ON blood_center(city_id);
 CREATE INDEX idx_donor_donor_id ON donor(donor_id);
 CREATE INDEX idx_receiver_phone ON receiver(r_phno);
+CREATE INDEX idx_donor_hospital ON donor(hospital_id);
+CREATE INDEX idx_donor_doctor ON donor(doctor_id);
 
 -- Drop existing function and triggers
 DROP TRIGGER IF EXISTS check_blood_group_sample ON blood_sample;
 DROP TRIGGER IF EXISTS check_blood_group_donor ON donor;
 DROP TRIGGER IF EXISTS check_blood_group_receiver ON receiver;
 DROP FUNCTION IF EXISTS validate_blood_group();
+
+-- Also drop the match_donors_with_receivers function to avoid type conflict
+DROP FUNCTION IF EXISTS match_donors_with_receivers(VARCHAR);
+DROP FUNCTION IF EXISTS update_updated_at_column();
+DROP FUNCTION IF EXISTS notify_appointment_status_change();
+DROP FUNCTION IF EXISTS find_centers_by_location(FLOAT, FLOAT, FLOAT);
+DROP FUNCTION IF EXISTS get_available_slots(VARCHAR, DATE);
+DROP FUNCTION IF EXISTS is_donor_eligible(VARCHAR);
 
 -- Create the updated blood group validation function
 CREATE OR REPLACE FUNCTION validate_blood_group()
@@ -208,7 +230,7 @@ CREATE TRIGGER check_blood_group_receiver
 
 -- Function to match donors with receivers
 CREATE OR REPLACE FUNCTION match_donors_with_receivers(receiver_id_param VARCHAR)
-RETURNS TABLE (donor_id VARCHAR, donor_name VARCHAR, blood_grp VARCHAR) AS $$
+RETURNS TABLE (donor_id VARCHAR, donor_name VARCHAR, donor_bgrp VARCHAR) AS $$
 DECLARE
     r_bgrp_var VARCHAR;
 BEGIN
@@ -324,10 +346,10 @@ BEGIN
         WHERE slot < '17:00'::TIME
     ),
     booked_slots AS (
-        SELECT DISTINCT DATE_TRUNC('hour', appointment_date)::TIME as booked_time
+        SELECT DISTINCT DATE_TRUNC('hour', donation_date)::TIME as booked_time
         FROM appointments
-        WHERE blood_center_id = p_center_id
-        AND DATE(appointment_date) = p_date
+        WHERE center_id = p_center_id
+        AND DATE(donation_date) = p_date
         AND status IN ('pending', 'confirmed')
     )
     SELECT h.slot
@@ -343,12 +365,12 @@ RETURNS BOOLEAN AS $$
 DECLARE
     last_donation_date DATE;
 BEGIN
-    SELECT DATE(appointment_date)
+    SELECT DATE(donation_date)
     INTO last_donation_date
     FROM appointments
     WHERE donor_id = p_donor_id
     AND status = 'completed'
-    ORDER BY appointment_date DESC
+    ORDER BY donation_date DESC
     LIMIT 1;
 
     RETURN (
@@ -357,194 +379,6 @@ BEGIN
     );
 END;
 $$ LANGUAGE plpgsql;
-
--- Enable Row Level Security
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE donor ENABLE ROW LEVEL SECURITY;
-ALTER TABLE receiver ENABLE ROW LEVEL SECURITY;
-ALTER TABLE blood_sample ENABLE ROW LEVEL SECURITY;
-ALTER TABLE hospital ENABLE ROW LEVEL SECURITY;
-ALTER TABLE staff ENABLE ROW LEVEL SECURITY;
-ALTER TABLE manager ENABLE ROW LEVEL SECURITY;
-ALTER TABLE doctor ENABLE ROW LEVEL SECURITY;
-ALTER TABLE city ENABLE ROW LEVEL SECURITY;
-ALTER TABLE blood_center ENABLE ROW LEVEL SECURITY;
-ALTER TABLE appointments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE appointment_notifications ENABLE ROW LEVEL SECURITY;
-
--- Drop existing policies
-DROP POLICY IF EXISTS "Cities are viewable by everyone" ON city;
-DROP POLICY IF EXISTS "authenticated_users_can_insert_cities" ON city;
-DROP POLICY IF EXISTS "Allow authenticated users to read all donors" ON donor;
-DROP POLICY IF EXISTS "Users can view own donor profile" ON donor;
-DROP POLICY IF EXISTS "Staff can update donor information" ON donor;
-DROP POLICY IF EXISTS "Allow authenticated users to read all blood centers" ON blood_center;
-
--- Create RLS policies
--- City policies
-CREATE POLICY "Cities are viewable by everyone"
-ON city FOR SELECT
-TO PUBLIC
-USING (true);
-
-CREATE POLICY "authenticated_users_can_insert_cities"
-ON city FOR INSERT
-TO authenticated
-WITH CHECK (true);
-
--- Donor policies
-DROP POLICY IF EXISTS "Allow authenticated users to read all donors" ON donor;
-DROP POLICY IF EXISTS "Users can view own donor profile" ON donor;
-DROP POLICY IF EXISTS "Staff can update donor information" ON donor;
-DROP POLICY IF EXISTS "Authenticated users can insert donors" ON donor;
-
--- Recreate donor policies with simpler logic
-CREATE POLICY "Anyone can read donors"
-ON donor FOR SELECT
-TO PUBLIC
-USING (true);
-
-CREATE POLICY "Authenticated users can insert donors"
-ON donor FOR INSERT
-TO authenticated
-WITH CHECK (true);
-
-CREATE POLICY "Authenticated users can update donors"
-ON donor FOR UPDATE
-TO authenticated
-USING (
-    EXISTS (
-        SELECT 1 FROM user_profiles up
-        WHERE up.profile_id = donor_id
-        AND up.user_id = auth.uid()
-        AND up.profile_type = 'donor'
-    )
-    OR
-    (SELECT COALESCE(raw_user_meta_data->>'role', '') FROM auth.users WHERE id = auth.uid()) = 'staff'
-);
-
--- Blood center policies
-CREATE POLICY "Allow authenticated users to read all blood centers"
-ON blood_center FOR SELECT
-TO authenticated
-USING (true);
-
--- Appointment policies
-CREATE POLICY "Users can view their own appointments"
-ON appointments FOR SELECT
-USING (
-    EXISTS (
-        SELECT 1 FROM user_profiles up
-        WHERE (up.profile_id = donor_id OR up.profile_id = receiver_id)
-        AND up.user_id = auth.uid()
-    )
-);
-
-CREATE POLICY "Users can create their own appointments"
-ON appointments FOR INSERT
-WITH CHECK (
-    EXISTS (
-        SELECT 1 FROM user_profiles up 
-        WHERE (up.profile_id = donor_id OR up.profile_id = receiver_id)
-        AND up.user_id = auth.uid()
-    )
-);
-
-CREATE POLICY "Users can update their own appointments"
-ON appointments FOR UPDATE
-USING (
-    EXISTS (
-        SELECT 1 FROM user_profiles up
-        WHERE (up.profile_id = donor_id OR up.profile_id = receiver_id)
-        AND up.user_id = auth.uid()
-    )
-);
-
--- Drop existing user_profiles policies
-DROP POLICY IF EXISTS "Users can manage their own profiles" ON user_profiles;
-DROP POLICY IF EXISTS "Users can read their own profiles" ON user_profiles;
-DROP POLICY IF EXISTS "Staff can read all profiles" ON user_profiles;
-DROP POLICY IF EXISTS "Authenticated users can manage their profiles" ON user_profiles;
-DROP POLICY IF EXISTS "Public can view user profiles" ON user_profiles;
-DROP POLICY IF EXISTS "Allow authenticated users to insert profiles" ON user_profiles;
-
--- Create simplified user_profiles policies without circular references
-CREATE POLICY "User profiles basic access"
-ON user_profiles
-FOR SELECT
-TO PUBLIC
-USING (true);
-
-CREATE POLICY "User profiles self management"
-ON user_profiles
-FOR ALL
-TO authenticated
-USING (user_id = auth.uid())
-WITH CHECK (user_id = auth.uid());
-
--- This policy allows inserting any profile (users will be limited by application logic)
-CREATE POLICY "User profiles insert"
-ON user_profiles
-FOR INSERT
-TO authenticated
-WITH CHECK (true);
-
--- Fix staff policy to use user metadata instead of referencing the same table
--- This was causing infinite recursion
-DROP POLICY IF EXISTS "Staff can read all profiles" ON user_profiles;
-CREATE POLICY "Staff admin access"
-ON user_profiles
-FOR SELECT
-TO authenticated
-USING (
-    (SELECT COALESCE(raw_user_meta_data->>'role', '') FROM auth.users WHERE id = auth.uid()) = 'staff'
-);
-
--- Add policy for inserting user profiles
-CREATE POLICY "Allow authenticated users to insert profiles"
-ON user_profiles
-FOR INSERT
-TO authenticated
-WITH CHECK (true);
-
--- Add policy for users table
-DROP POLICY IF EXISTS "Users can view and update their own data" ON users;
-
-CREATE POLICY "Users can view and update their own data"
-ON users
-FOR ALL
-TO authenticated
-USING (id = auth.uid())
-WITH CHECK (id = auth.uid());
-
--- Function to set up city table policies
-CREATE OR REPLACE FUNCTION setup_city_policies()
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-BEGIN
-    -- Disable RLS temporarily
-    ALTER TABLE city DISABLE ROW LEVEL SECURITY;
-
-    -- Drop existing policies
-    DROP POLICY IF EXISTS "Enable read access for all users" ON city;
-    DROP POLICY IF EXISTS "Enable insert for authenticated users" ON city;
-
-    -- Create new policies
-    CREATE POLICY "Enable read access for all users"
-    ON city FOR SELECT
-    USING (true);
-
-    CREATE POLICY "Enable insert for authenticated users"
-    ON city FOR INSERT
-    WITH CHECK (true);
-
-    -- Enable RLS
-    ALTER TABLE city ENABLE ROW LEVEL SECURITY;
-END;
-$$;
 
 -- First, disable RLS
 ALTER TABLE city DISABLE ROW LEVEL SECURITY;
@@ -682,3 +516,52 @@ TO authenticated
 USING (
   (SELECT COALESCE(raw_user_meta_data->>'role', '') FROM auth.users WHERE id = auth.uid()) = 'staff'
 );
+
+-- Create policies for hospital_doctor table
+CREATE POLICY "Anyone can read hospital_doctor relationships"
+ON hospital_doctor
+FOR SELECT
+TO PUBLIC
+USING (true);
+
+-- Add sample doctors with specialization
+INSERT INTO doctor (doc_id, doc_name, doc_phno, specialization)
+VALUES
+  ('DOC001', 'Dr. James Smith', '555-0101', 'Hematology'),
+  ('DOC002', 'Dr. Maria Rodriguez', '555-0102', 'Internal Medicine'),
+  ('DOC003', 'Dr. David Johnson', '555-0103', 'Transfusion Medicine'),
+  ('DOC004', 'Dr. Sarah Chen', '555-0104', 'Clinical Pathology'),
+  ('DOC005', 'Dr. Robert Kim', '555-0105', 'Hematology')
+ON CONFLICT (doc_id) 
+DO UPDATE SET 
+  doc_name = EXCLUDED.doc_name,
+  doc_phno = EXCLUDED.doc_phno,
+  specialization = EXCLUDED.specialization;
+
+-- Add sample hospitals with addresses
+INSERT INTO hospital (h_id, h_name, city_id, h_address)
+VALUES
+  ('HNYC001', 'New York General Hospital', 'NYC', '123 Main St, New York'),
+  ('HNYC002', 'New York Community Medical Center', 'NYC', '456 Park Ave, New York'),
+  ('HLA001', 'Los Angeles General Hospital', 'LA', '123 Broadway, Los Angeles'),
+  ('HLA002', 'LA Community Medical Center', 'LA', '456 Hollywood Blvd, Los Angeles'),
+  ('HCHI001', 'Chicago General Hospital', 'CHI', '123 State St, Chicago')
+ON CONFLICT (h_id) 
+DO UPDATE SET
+  h_name = EXCLUDED.h_name,
+  city_id = EXCLUDED.city_id,
+  h_address = EXCLUDED.h_address;
+
+-- Add hospital-doctor relationships AFTER hospitals exist
+INSERT INTO hospital_doctor (hospital_id, doctor_id)
+VALUES
+  ('HNYC001', 'DOC001'),
+  ('HNYC001', 'DOC002'),
+  ('HNYC002', 'DOC003'),
+  ('HLA001', 'DOC004'),
+  ('HLA002', 'DOC005'),
+  ('HCHI001', 'DOC001')
+ON CONFLICT (hospital_id, doctor_id) DO NOTHING;
+
+-- Update the database schema cache - important for PostgREST
+NOTIFY pgrst, 'reload schema';

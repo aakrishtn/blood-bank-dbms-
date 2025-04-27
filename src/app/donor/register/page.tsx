@@ -11,10 +11,20 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/components/ui/use-toast";
 import { supabase } from "@/lib/supabase";
+import { getHospitalsByCity, getRandomDoctor, seedHospitalsAndDoctors } from "@/lib/hospital";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { CalendarIcon } from "lucide-react";
+import { format, addDays, isAfter, isBefore, startOfDay } from "date-fns";
 
 interface City {
   city_id: string;
   city_name: string;
+}
+
+interface Hospital {
+  h_id: string;
+  h_name: string;
 }
 
 export default function DonorRegistrationPage() {
@@ -25,9 +35,30 @@ export default function DonorRegistrationPage() {
   const [donorPhone, setDonorPhone] = useState("");
   const [cities, setCities] = useState<City[]>([]);
   const [selectedCity, setSelectedCity] = useState("");
+  const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const [selectedHospital, setSelectedHospital] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [appointmentDate, setAppointmentDate] = useState<Date | undefined>(undefined);
+  const [appointmentTime, setAppointmentTime] = useState<string>("10:00");
   const router = useRouter();
+
+  // Generate time slots from 8 AM to 6 PM
+  const timeSlots = Array.from({ length: 21 }, (_, i) => {
+    const hour = Math.floor(i / 2) + 8;
+    const minute = i % 2 === 0 ? "00" : "30";
+    const hourFormatted = hour < 10 ? `0${hour}` : hour;
+    return `${hourFormatted}:${minute}`;
+  });
+  
+  // Calculate available date range (today + 30 days)
+  const today = startOfDay(new Date());
+  const maxDate = addDays(today, 30);
+  
+  // Function to determine if a date is unavailable
+  const isDateUnavailable = (date: Date) => {
+    return isBefore(date, today) || isAfter(date, maxDate);
+  };
 
   useEffect(() => {
     // Fetch the list of cities
@@ -99,13 +130,58 @@ export default function DonorRegistrationPage() {
       }
     };
 
+    // Seed hospitals and doctors if needed
+    const seedData = async () => {
+      try {
+        await seedHospitalsAndDoctors();
+      } catch (error) {
+        console.error("Error seeding hospitals and doctors:", error);
+      }
+    };
+
     const init = async () => {
       await fetchCities();
       await checkAuth();
+      await seedData();
     };
 
     init();
   }, [router]);
+
+  // Fetch hospitals when city changes
+  useEffect(() => {
+    const fetchHospitals = async () => {
+      if (selectedCity) {
+        try {
+          console.log("Fetching hospitals for city:", selectedCity);
+          const hospitalsData = await getHospitalsByCity(selectedCity);
+          console.log("Hospitals data received:", hospitalsData);
+          
+          if (hospitalsData && hospitalsData.length > 0) {
+            setHospitals(hospitalsData);
+            // Auto-select the first hospital by default
+            setSelectedHospital(hospitalsData[0].h_id);
+          } else {
+            setHospitals([]);
+            setSelectedHospital("");
+          }
+        } catch (error) {
+          console.error("Error fetching hospitals:", error);
+          toast({
+            variant: "destructive",
+            title: "Error",
+            description: "Failed to load hospitals. Please try again later."
+          });
+        }
+      } else {
+        // Clear hospitals if no city is selected
+        setHospitals([]);
+        setSelectedHospital("");
+      }
+    };
+
+    fetchHospitals();
+  }, [selectedCity]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,6 +192,16 @@ export default function DonorRegistrationPage() {
         variant: "destructive",
         title: "Age Restriction",
         description: "You must be at least 18 years old to register as a donor.",
+      });
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (!appointmentDate) {
+      toast({
+        variant: "destructive",
+        title: "Appointment Required",
+        description: "Please select an appointment date and time for your donation.",
       });
       setIsSubmitting(false);
       return;
@@ -155,6 +241,10 @@ export default function DonorRegistrationPage() {
       } else {
         phoneToUse = emailForPhone;
       }
+
+      // Get a random doctor
+      const doctor = await getRandomDoctor();
+      console.log("Selected random doctor:", doctor);
       
       // Create donor record
       console.log("Adding donor with data:", {
@@ -165,6 +255,8 @@ export default function DonorRegistrationPage() {
         donor_sex: donorSex,
         donor_phno: phoneToUse,
         city_id: selectedCity,
+        hospital_id: selectedHospital,
+        doctor_id: doctor.doc_id
       });
       
       const { error: insertError } = await supabase.from('donor').insert({
@@ -175,11 +267,49 @@ export default function DonorRegistrationPage() {
         donor_sex: donorSex,
         donor_phno: phoneToUse,
         city_id: selectedCity,
+        hospital_id: selectedHospital,
+        doctor_id: doctor.doc_id
       });
       
       if (insertError) {
         console.error("Supabase insert error:", insertError);
-        throw new Error(`Database error: ${insertError.message} (Code: ${insertError.code})`);
+        throw new Error(`Database error: ${insertError.message || "Unknown error"} (Code: ${insertError.code || "unknown"})`);
+      }
+      
+      // Create appointment for the donor
+      try {
+        const appointmentId = `APT${Date.now().toString().slice(-8)}`;
+        const appointmentDateTime = new Date(appointmentDate);
+        const [hours, minutes] = appointmentTime.split(':').map(Number);
+        appointmentDateTime.setHours(hours, minutes, 0, 0);
+        
+        console.log("Creating appointment:", {
+          appointment_id: appointmentId,
+          donor_id: donorId,
+          appointment_date: appointmentDateTime.toISOString(),
+          status: 'scheduled',
+          hospital_id: selectedHospital,
+          notes: 'Created during donor registration'
+        });
+        
+        const { error: appointmentError } = await supabase.from('appointments').insert({
+          appointment_id: appointmentId,
+          donor_id: donorId,
+          appointment_date: appointmentDateTime.toISOString(),
+          status: 'scheduled',
+          hospital_id: selectedHospital,
+          notes: 'Created during donor registration'
+        });
+        
+        if (appointmentError) {
+          console.error("Error creating appointment:", appointmentError);
+          // Don't throw error here, continue with registration
+        } else {
+          console.log("Appointment created successfully");
+        }
+      } catch (appointmentErr) {
+        console.error("Exception creating appointment:", appointmentErr);
+        // Continue with registration process even if appointment creation fails
       }
       
       // Link user to donor profile
@@ -294,7 +424,7 @@ export default function DonorRegistrationPage() {
         // Don't return here, continue with role update
       }
 
-      // Update the user metadata to set role as donor
+      // Update the user metadata to set role as donor with additional hospital and doctor info
       try {
         console.log("Updating user role...");
         const response = await fetch('/api/users/update-role', {
@@ -309,7 +439,10 @@ export default function DonorRegistrationPage() {
               donor_id: donorId,
               donor_name: donorName,
               donor_bgrp: donorBloodGroup,
-              donor_age: parseInt(donorAge)
+              donor_age: parseInt(donorAge),
+              hospital_id: selectedHospital,
+              doctor_id: doctor.doc_id,
+              doctor_name: doctor.doc_name
             }
           }),
         });
@@ -333,7 +466,7 @@ export default function DonorRegistrationPage() {
 
       toast({
         title: "Registration Successful",
-        description: "You have been registered as a donor successfully.",
+        description: "You have been registered as a donor successfully. Your appointment has been scheduled.",
       });
       
       router.push("/dashboard");
@@ -471,13 +604,80 @@ export default function DonorRegistrationPage() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="hospital" className="text-sm font-medium text-gray-900">Hospital</Label>
+                  <Select value={selectedHospital} onValueChange={setSelectedHospital} required={!!selectedCity}>
+                    <SelectTrigger className="h-11 border-gray-300 focus:border-red-500 focus:ring-red-500 rounded-md">
+                      <SelectValue placeholder="Select hospital" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60 overflow-y-auto z-50 bg-gray-100 text-gray-900 border border-gray-300">
+                      {hospitals && hospitals.length > 0 ? (
+                        hospitals.map((hospital) => (
+                          <SelectItem 
+                            key={hospital.h_id} 
+                            value={hospital.h_id} 
+                            className="text-gray-900 hover:bg-gray-200"
+                          >
+                            {hospital.h_name}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="no-hospitals" disabled>
+                          {selectedCity ? "No hospitals available in selected city" : "Please select a city first"}
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-gray-500">A doctor will be automatically assigned to you</p>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="appointmentDate" className="text-sm font-medium text-gray-900">Appointment Date</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={`w-full h-11 justify-start text-left font-normal border-gray-300 ${!appointmentDate ? 'text-gray-500' : ''}`}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {appointmentDate ? format(appointmentDate, 'PPP') : <span>Select appointment date</span>}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={appointmentDate}
+                        onSelect={setAppointmentDate}
+                        disabled={isDateUnavailable}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="appointmentTime" className="text-sm font-medium text-gray-900">Appointment Time</Label>
+                  <Select value={appointmentTime} onValueChange={setAppointmentTime} required>
+                    <SelectTrigger className="h-11 border-gray-300 focus:border-red-500 focus:ring-red-500 rounded-md">
+                      <SelectValue placeholder="Select time" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60 overflow-y-auto bg-gray-100 text-gray-900 border border-gray-300">
+                      {timeSlots.map((time) => (
+                        <SelectItem key={time} value={time} className="text-gray-900 hover:bg-gray-200">
+                          {time}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               
               <div className="pt-4">
                 <Button 
                   type="submit" 
                   className="w-full h-12 bg-red-600 hover:bg-red-700 text-white font-medium rounded-md shadow-sm transition-colors" 
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !selectedCity || !selectedHospital || !appointmentDate}
                 >
                   {isSubmitting ? (
                     <span className="flex items-center justify-center">

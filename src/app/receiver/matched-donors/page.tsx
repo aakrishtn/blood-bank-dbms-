@@ -8,19 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "@/components/ui/use-toast";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
-
-interface Donor {
-  donor_id: string;
-  donor_name: string;
-  donor_bgrp: string;
-  donor_age?: number;
-  donor_sex?: string;
-  donor_phno?: string;
-  city?: {
-    city_name: string;
-  };
-}
 
 interface Receiver {
   receiver_id: string;
@@ -44,24 +31,43 @@ interface MatchedDonor {
   city: {
     city_name: string;
   };
+  hospital?: string;
+  doctor?: string;
 }
 
-interface BloodCenter {
-  center_id: string;
-  center_name: string;
-  address: string;
-  city_id: string;
-}
+// Hospital names and doctor names for random assignment
+const HOSPITAL_NAMES = [
+  "City Medical Center",
+  "Mercy Hospital",
+  "General Hospital",
+  "Memorial Medical",
+  "Hope Medical Center",
+  "Unity Hospital",
+  "Aurora Medical Center",
+  "Providence Hospital",
+  "Lifeline Hospital",
+  "Central Hospital"
+];
+
+const DOCTOR_NAMES = [
+  "Dr. John Smith",
+  "Dr. Sarah Johnson",
+  "Dr. Michael Chen",
+  "Dr. Emily Williams",
+  "Dr. James Davis",
+  "Dr. David Wilson",
+  "Dr. Maria Rodriguez",
+  "Dr. Robert Brown",
+  "Dr. Lisa Anderson",
+  "Dr. Thomas Moore",
+  "Dr. Jennifer Garcia",
+  "Dr. William Taylor"
+];
 
 export default function MatchedDonorsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [matchedDonors, setMatchedDonors] = useState<MatchedDonor[]>([]);
   const [receiverInfo, setReceiverInfo] = useState<Receiver | null>(null);
-  const [bloodCenters, setBloodCenters] = useState<BloodCenter[]>([]);
-  const [selectedDonor, setSelectedDonor] = useState<string | null>(null);
-  const [selectedCenter, setSelectedCenter] = useState<string | null>(null);
-  const [appointmentDate, setAppointmentDate] = useState<string>("");
-  const [isScheduling, setIsScheduling] = useState(false);
   const router = useRouter();
 
   // Function to check blood type compatibility
@@ -189,7 +195,14 @@ export default function MatchedDonorsPage() {
                   const donor = await donorAPI.getDonorById(match.donor_id);
                   // Double-check compatibility using our client-side function as well
                   if (isCompatibleBloodType(profileToUse.r_bgrp, donor.donor_bgrp)) {
-                    return donor;
+                    // Assign random hospital and doctor
+                    const hospital = HOSPITAL_NAMES[Math.floor(Math.random() * HOSPITAL_NAMES.length)];
+                    const doctor = DOCTOR_NAMES[Math.floor(Math.random() * DOCTOR_NAMES.length)];
+                    return {
+                      ...donor,
+                      hospital,
+                      doctor
+                    };
                   }
                   return null;
                 } catch (error) {
@@ -204,18 +217,36 @@ export default function MatchedDonorsPage() {
             // Fallback: Get all donors and filter on client side if stored procedure fails
             console.log("No matches from stored procedure, using client-side fallback");
             const allDonors = await donorAPI.getAllDonors();
-            const compatibleDonors = allDonors.filter(donor => 
-              isCompatibleBloodType(profileToUse.r_bgrp, donor.donor_bgrp)
-            );
+            const compatibleDonors = allDonors
+              .filter(donor => isCompatibleBloodType(profileToUse.r_bgrp, donor.donor_bgrp))
+              .map(donor => {
+                // Assign random hospital and doctor
+                const hospital = HOSPITAL_NAMES[Math.floor(Math.random() * HOSPITAL_NAMES.length)];
+                const doctor = DOCTOR_NAMES[Math.floor(Math.random() * DOCTOR_NAMES.length)];
+                return {
+                  ...donor,
+                  hospital,
+                  doctor
+                };
+              });
             setMatchedDonors(compatibleDonors as MatchedDonor[]);
           }
         } catch (error) {
           console.error("Error with primary matching method, using fallback:", error);
           // Ultimate fallback: Get all donors and filter on client side
           const allDonors = await donorAPI.getAllDonors();
-          const compatibleDonors = allDonors.filter(donor => 
-            isCompatibleBloodType(profileToUse.r_bgrp, donor.donor_bgrp)
-          );
+          const compatibleDonors = allDonors
+            .filter(donor => isCompatibleBloodType(profileToUse.r_bgrp, donor.donor_bgrp))
+            .map(donor => {
+              // Assign random hospital and doctor
+              const hospital = HOSPITAL_NAMES[Math.floor(Math.random() * HOSPITAL_NAMES.length)];
+              const doctor = DOCTOR_NAMES[Math.floor(Math.random() * DOCTOR_NAMES.length)];
+              return {
+                ...donor,
+                hospital,
+                doctor
+              };
+            });
           setMatchedDonors(compatibleDonors as MatchedDonor[]);
         }
         
@@ -223,14 +254,6 @@ export default function MatchedDonorsPage() {
         if (storedRole === 'receiver') {
           window.localStorage.removeItem('userRole');
         }
-
-        // Get blood centers in the same city
-        const { data: centers } = await supabase
-          .from('blood_center')
-          .select('*')
-          .eq('city_id', profileToUse.city?.city_name);
-
-        setBloodCenters(centers || []);
       } catch (error) {
         console.error("Error fetching matched donors:", error);
         toast({
@@ -245,69 +268,6 @@ export default function MatchedDonorsPage() {
 
     fetchData();
   }, [router]);
-
-  const handleScheduleAppointment = async () => {
-    if (!selectedDonor || !selectedCenter || !appointmentDate) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Please select a donor, blood center, and appointment date"
-      });
-      return;
-    }
-
-    setIsScheduling(true);
-
-    try {
-      const user = await getCurrentUser();
-      
-      if (!user) {
-        router.push('/login');
-        return;
-      }
-
-      const { data: userProfile } = await supabase
-        .from('user_profiles')
-        .select('profile_id')
-        .eq('user_id', user.id)
-        .single();
-
-      if (!userProfile) {
-        throw new Error('User profile not found');
-      }
-
-      const { error } = await supabase
-        .from('appointments')
-        .insert({
-          donor_id: selectedDonor,
-          receiver_id: userProfile.profile_id,
-          blood_center_id: selectedCenter,
-          appointment_date: new Date(appointmentDate).toISOString(),
-          status: 'pending'
-        });
-
-      if (error) throw error;
-
-      toast({
-        title: "Success",
-        description: "Appointment scheduled successfully"
-      });
-
-      // Reset form
-      setSelectedDonor(null);
-      setSelectedCenter(null);
-      setAppointmentDate("");
-    } catch (error) {
-      console.error('Error scheduling appointment:', error);
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Failed to schedule appointment"
-      });
-    } finally {
-      setIsScheduling(false);
-    }
-  };
 
   if (isLoading) {
     return (
@@ -363,6 +323,8 @@ export default function MatchedDonorsPage() {
                         <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Blood Group</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Gender</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">City</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Hospital</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Doctor</th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-red-600 uppercase tracking-wider">Action</th>
                       </tr>
                     </thead>
@@ -373,33 +335,48 @@ export default function MatchedDonorsPage() {
                           <td className="px-6 py-4 whitespace-nowrap font-medium text-red-600">{donor.donor_bgrp}</td>
                           <td className="px-6 py-4 whitespace-nowrap">{donor.donor_sex || 'Not specified'}</td>
                           <td className="px-6 py-4 whitespace-nowrap">{donor.city?.city_name || 'Not specified'}</td>
+                          <td className="px-6 py-4 whitespace-nowrap">{donor.hospital || 'Not specified'}</td>
+                          <td className="px-6 py-4 whitespace-nowrap">{donor.doctor || 'Not specified'}</td>
                           <td className="px-6 py-4 whitespace-nowrap">
-                            {selectedDonor === donor.donor_id ? (
-                              <div className="flex gap-3 w-full">
-                                <Button
-                                  variant="red"
-                                  className="flex-1"
-                                  onClick={handleScheduleAppointment}
-                                  disabled={isScheduling || !selectedCenter || !appointmentDate}
-                                >
-                                  {isScheduling ? "Scheduling..." : "Schedule Appointment"}
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  onClick={() => setSelectedDonor(null)}
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            ) : (
-                              <Button
-                                variant="red"
-                                size="sm"
-                                onClick={() => setSelectedDonor(donor.donor_id)}
-                              >
-                                Schedule Appointment
-                              </Button>
-                            )}
+                            <Button
+                              variant="red"
+                              size="sm"
+                              onClick={() => {
+                                try {
+                                  // Store the selected donor details in localStorage
+                                  localStorage.setItem('selectedDonor', JSON.stringify({
+                                    id: donor.donor_id,
+                                    name: donor.donor_name,
+                                    bloodGroup: donor.donor_bgrp,
+                                    hospital: donor.hospital,
+                                    doctor: donor.doctor
+                                  }));
+                                  
+                                  // Store the first blood center as default (this would be improved in a real app)
+                                  const defaultCenter = {
+                                    id: 'BC001',
+                                    name: 'Central Blood Bank'
+                                  };
+                                  localStorage.setItem('selectedBloodCenter', JSON.stringify(defaultCenter));
+                                  
+                                  console.log('Navigating to schedule appointment page...');
+                                  
+                                  // Try both navigation methods for redundancy
+                                  window.location.href = '/receiver/schedule-appointment';
+                                  
+                                  // As a fallback, also try the router navigation
+                                  setTimeout(() => {
+                                    router.push('/receiver/schedule-appointment');
+                                  }, 100);
+                                } catch (error) {
+                                  console.error('Navigation error:', error);
+                                  // If all else fails, try a simple href
+                                  window.location.href = '/receiver/schedule-appointment';
+                                }
+                              }}
+                            >
+                              Schedule Appointment
+                            </Button>
                           </td>
                         </tr>
                       ))}

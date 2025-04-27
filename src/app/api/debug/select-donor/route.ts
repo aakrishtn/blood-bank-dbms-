@@ -1,6 +1,5 @@
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
+import { createServerSupabaseClient } from '@/utils/supabase/server';
 
 export async function POST(request: Request) {
   try {
@@ -11,8 +10,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Donor ID is required' }, { status: 400 });
     }
     
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    // Use the server-side Supabase client instead
+    const supabase = createServerSupabaseClient();
     
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {

@@ -3,10 +3,10 @@ import { supabase } from '@/lib/supabase';
 
 export async function POST(request: Request) {
   try {
-    const { donor_id, receiver_id, appointment_date, blood_center_id, notes } = await request.json();
+    const { donor_id, receiver_id, donation_date, center_id, notes, hospital, doctor } = await request.json();
 
     // Validate required fields
-    if (!donor_id || !receiver_id || !appointment_date || !blood_center_id) {
+    if (!donor_id || !receiver_id || !donation_date || !center_id) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
@@ -19,14 +19,16 @@ export async function POST(request: Request) {
       .insert({
         donor_id,
         receiver_id,
-        appointment_date,
-        blood_center_id,
+        donation_date,
+        center_id,
         notes,
+        hospital,
+        doctor,
         status: 'pending'
       })
       .select(`
         *,
-        blood_center:blood_center_id (
+        blood_center:center_id (
           center_name,
           address
         ),
@@ -60,12 +62,13 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const donorId = searchParams.get('donor_id');
     const receiverId = searchParams.get('receiver_id');
+    const userId = searchParams.get('userId');
 
     let query = supabase
       .from('appointments')
       .select(`
         *,
-        blood_center:blood_center_id (
+        blood_center:center_id (
           center_name,
           address
         ),
@@ -83,7 +86,27 @@ export async function GET(request: Request) {
       query = query.eq('receiver_id', receiverId);
     }
 
-    const { data, error } = await query.order('appointment_date', { ascending: true });
+    // If userId is provided, get the user's profile to find their donor or receiver ID
+    if (userId && !donorId && !receiverId) {
+      const { data: userProfile } = await supabase
+        .from('user_profiles')
+        .select('profile_id, profile_type')
+        .eq('user_id', userId)
+        .single();
+      
+      if (userProfile) {
+        // If user is a donor, filter by donor_id
+        if (userProfile.profile_type === 'donor') {
+          query = query.eq('donor_id', userProfile.profile_id);
+        } 
+        // If user is a receiver, filter by receiver_id
+        else if (userProfile.profile_type === 'receiver') {
+          query = query.eq('receiver_id', userProfile.profile_id);
+        }
+      }
+    }
+
+    const { data, error } = await query.order('donation_date', { ascending: true });
 
     if (error) {
       console.error('Error fetching appointments:', error);
@@ -93,11 +116,12 @@ export async function GET(request: Request) {
       );
     }
 
-    return NextResponse.json(data);
+    // Wrap the data in an appointments key
+    return NextResponse.json({ appointments: data || [] });
   } catch (error) {
     console.error('Error in appointments API:', error);
     return NextResponse.json(
-      { error: 'Server error fetching appointments' },
+      { error: 'Server error fetching appointments', appointments: [] },
       { status: 500 }
     );
   }

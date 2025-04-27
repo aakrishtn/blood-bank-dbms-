@@ -241,7 +241,8 @@ export default function ReceiverRegistrationPage() {
             receiverDetails: {
               receiver_id: receiverId,
               receiver_name: receiverName,
-              r_bgrp: receiverBloodGroup
+              r_bgrp: receiverBloodGroup,
+              r_age: parseInt(receiverAge)
             }
           }),
         });
